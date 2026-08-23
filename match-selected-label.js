@@ -1,13 +1,17 @@
 // Shared Match squad selector.
 // Training remains the normal local attendance workflow. Match selections are
-// stored immediately in Supabase so Dan / managers see the same squad on every
-// device. Backend status stays "Present" for a normal selection so the existing
-// Matchday / Excel reconciliation remains compatible.
+// stored immediately in Supabase so managers see the same squad on every device.
+// Backend status stays "Present" for a normal Selected player so Matchday / Excel
+// reconciliation remains compatible.
 (() => {
   const coreRenderPlayers = renderPlayers;
   const coreUpdateSummary = updateSummary;
   const coreSetPlayerStatus = setPlayerStatus;
   const coreClearSession = clearSession;
+
+  const ALL_MATCH_STATUSES = ["Present", "Late", "No Show", "Unavailable", "Injured", "Rotated"];
+  const BOTTOM_STATUSES = new Set(["Unavailable", "Injured", "Rotated"]);
+  const SQUAD_STATUSES = new Set(["Present", "Late"]);
 
   let sharedFixture = null;
   let sharedClient = null;
@@ -18,11 +22,7 @@
 
   function matchStatus(playerId) {
     const status = getPlayerStatusForCurrentSession(playerId);
-    return ["Present", "Late", "No Show"].includes(status) ? status : "";
-  }
-
-  function isSelectedStatus(status) {
-    return ["Present", "Late", "No Show"].includes(status);
+    return ALL_MATCH_STATUSES.includes(status) ? status : "";
   }
 
   function formatFixtureDate(value) {
@@ -65,8 +65,7 @@
       banner = document.createElement("section");
       banner.id = "shared-squad-fixture";
       banner.className = "shared-squad-fixture hidden";
-      const summary = document.querySelector(".summary-bar");
-      summary?.insertAdjacentElement("afterend", banner);
+      document.querySelector(".summary-bar")?.insertAdjacentElement("afterend", banner);
     }
 
     if (!isMatch()) {
@@ -79,7 +78,6 @@
       banner.innerHTML = `<strong>Match squad</strong><span>${message}</span>`;
       return;
     }
-
     if (!sharedFixture) {
       banner.innerHTML = `<strong>Match squad</strong><span>No upcoming fixture found</span>`;
       return;
@@ -117,7 +115,7 @@
 
       attendance = {};
       (data || []).forEach(row => {
-        if (isSelectedStatus(row.status)) attendance[row.player_id] = row.status;
+        if (ALL_MATCH_STATUSES.includes(row.status)) attendance[row.player_id] = row.status;
       });
       renderPlayers();
       updateSummary();
@@ -163,7 +161,7 @@
   }
 
   function selectedCount() {
-    return players.filter(player => isSelectedStatus(matchStatus(player.id))).length;
+    return players.filter(player => SQUAD_STATUSES.has(matchStatus(player.id))).length;
   }
 
   async function setSharedPlayerStatus(playerId, requestedStatus) {
@@ -171,8 +169,8 @@
     let next = current;
 
     if (requestedStatus === "Present") {
-      if (current) {
-        next = ""; // Selected is the master toggle: turn squad selection off.
+      if (current === "Present" || current === "Late" || current === "No Show") {
+        next = "";
       } else {
         if (selectedCount() >= 16) {
           window.alert("Match squad is limited to 16 selected players.");
@@ -181,8 +179,10 @@
         next = "Present";
       }
     } else if (requestedStatus === "Late" || requestedStatus === "No Show") {
-      if (!current) return; // Secondary states only exist once selected.
+      if (!["Present", "Late", "No Show"].includes(current)) return;
       next = current === requestedStatus ? "Present" : requestedStatus;
+    } else if (BOTTOM_STATUSES.has(requestedStatus)) {
+      next = current === requestedStatus ? "" : requestedStatus;
     }
 
     const before = current;
@@ -209,15 +209,36 @@
     return setSharedPlayerStatus(playerId, status);
   };
 
+  function addStatusButton(grid, player, status, label, current) {
+    const button = document.createElement("button");
+    button.className = `status-button status-${status.toLowerCase().replace(/\s+/g, "-")}`;
+    button.type = "button";
+    button.textContent = label || status;
+    if (current === status) button.classList.add("selected");
+    button.addEventListener("click", () => setPlayerStatus(player.id, status));
+    grid.appendChild(button);
+  }
+
   renderPlayers = function () {
     if (!isMatch()) return coreRenderPlayers();
 
     playerListElement.innerHTML = "";
-    players.forEach(player => {
+    const orderedPlayers = players
+      .map((player, index) => ({ player, index }))
+      .sort((a, b) => {
+        const aBottom = BOTTOM_STATUSES.has(matchStatus(a.player.id)) ? 1 : 0;
+        const bBottom = BOTTOM_STATUSES.has(matchStatus(b.player.id)) ? 1 : 0;
+        return aBottom - bBottom || a.index - b.index;
+      })
+      .map(item => item.player);
+
+    orderedPlayers.forEach(player => {
       const current = matchStatus(player.id);
-      const selected = Boolean(current);
+      const bottom = BOTTOM_STATUSES.has(current);
+      const selectedFamily = ["Present", "Late", "No Show"].includes(current);
+
       const card = document.createElement("article");
-      card.className = `player-card${selected ? " shared-selected-player" : ""}`;
+      card.className = `player-card${selectedFamily ? " shared-selected-player" : ""}${bottom ? " shared-bottom-player" : ""}`;
 
       const name = document.createElement("div");
       name.className = "player-name";
@@ -225,27 +246,24 @@
 
       const buttonGrid = document.createElement("div");
       buttonGrid.className = "status-buttons shared-squad-buttons";
-      buttonGrid.style.setProperty("--button-count", selected ? 3 : 1);
-      buttonGrid.classList.add(`button-count-${selected ? 3 : 1}`);
 
-      const selectedButton = document.createElement("button");
-      selectedButton.className = "status-button status-present";
-      selectedButton.type = "button";
-      selectedButton.textContent = "Selected";
-      if (selected) selectedButton.classList.add("selected");
-      selectedButton.addEventListener("click", () => setPlayerStatus(player.id, "Present"));
-      buttonGrid.appendChild(selectedButton);
-
-      if (selected) {
-        ["Late", "No Show"].forEach(status => {
-          const button = document.createElement("button");
-          button.className = `status-button status-${status.toLowerCase().replace(/\s+/g, "-")}`;
-          button.type = "button";
-          button.textContent = status;
-          if (current === status) button.classList.add("selected");
-          button.addEventListener("click", () => setPlayerStatus(player.id, status));
-          buttonGrid.appendChild(button);
-        });
+      if (bottom) {
+        buttonGrid.style.setProperty("--button-count", 1);
+        buttonGrid.classList.add("button-count-1");
+        addStatusButton(buttonGrid, player, current, current, current);
+      } else if (selectedFamily) {
+        buttonGrid.style.setProperty("--button-count", 3);
+        buttonGrid.classList.add("button-count-3");
+        addStatusButton(buttonGrid, player, "Present", "Selected", current);
+        addStatusButton(buttonGrid, player, "Late", "Late", current);
+        addStatusButton(buttonGrid, player, "No Show", "No Show", current);
+      } else {
+        buttonGrid.style.setProperty("--button-count", 4);
+        buttonGrid.classList.add("button-count-4");
+        addStatusButton(buttonGrid, player, "Present", "Selected", current);
+        addStatusButton(buttonGrid, player, "Injured", "Injured", current);
+        addStatusButton(buttonGrid, player, "Unavailable", "Unavailable", current);
+        addStatusButton(buttonGrid, player, "Rotated", "Rotated", current);
       }
 
       card.appendChild(name);
@@ -265,7 +283,7 @@
 
   clearSession = function () {
     if (!isMatch()) return coreClearSession();
-    window.alert("Match selections are shared. Untoggle Selected on a player to remove them from the squad.");
+    window.alert("Match selections are shared. Toggle a player's current status to clear it.");
   };
 
   function stopSharedSync() {
@@ -316,7 +334,6 @@
     });
   });
 
-  // Matchday help copy only; the stored status intentionally remains Present.
   document.querySelectorAll(".matchday-help").forEach(element => {
     element.textContent = element.textContent.replace(
       "Players marked Present or Late on the Match attendance screen are included automatically.",
@@ -329,14 +346,17 @@
     .shared-squad-fixture{margin:0 0 14px;padding:13px 16px;border:1px solid rgba(59,130,246,.28);border-radius:14px;background:rgba(37,99,235,.08);display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
     .shared-squad-fixture.hidden{display:none}
     .shared-squad-fixture strong{font-size:16px}.shared-squad-fixture span{color:var(--muted,#64748b)}.shared-squad-fixture small{margin-left:auto;color:var(--muted,#64748b)}
-    .shared-squad-buttons.button-count-1{grid-template-columns:1fr}.shared-squad-buttons.button-count-3{grid-template-columns:repeat(3,minmax(0,1fr))}
-    @media(max-width:640px){.shared-squad-fixture{align-items:flex-start;flex-direction:column;gap:4px}.shared-squad-fixture small{margin-left:0}.shared-squad-buttons.button-count-3{grid-template-columns:repeat(3,minmax(0,1fr))}}
+    .shared-squad-buttons.button-count-1{grid-template-columns:1fr}
+    .shared-squad-buttons.button-count-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .shared-squad-buttons.button-count-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+    @media(max-width:640px){
+      .shared-squad-fixture{align-items:flex-start;flex-direction:column;gap:4px}.shared-squad-fixture small{margin-left:0}
+      .shared-squad-buttons.button-count-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+      .shared-squad-buttons.button-count-4{grid-template-columns:repeat(2,minmax(0,1fr))}
+    }
   `;
   document.head.appendChild(style);
 
-  // app.js init is asynchronous. Wait until players are available, then honour
-  // a previously saved Match tab and replace any device-local Match marks with
-  // the shared Supabase squad.
   let bootAttempts = 0;
   const boot = setInterval(() => {
     bootAttempts += 1;
