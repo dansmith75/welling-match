@@ -31,6 +31,10 @@
     return parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : value;
   }
 
+  function isFriendlyFixture() {
+    return String(sharedFixture?.competition || "").trim().toLowerCase() === "friendly";
+  }
+
   async function resolveSharedFixture() {
     try {
       const url = window.WELLING_APP_CONFIG?.dashboardMatchesUrl || "matches.json";
@@ -86,7 +90,7 @@
     banner.innerHTML = `
       <strong>${sharedFixture.opposition || "Next Match"}</strong>
       <span>${formatFixtureDate(sharedFixture.date)} · ${sharedFixture.homeAway || sharedFixture.venue || ""} · ${sharedFixture.competition || ""}</span>
-      <small>Shared live squad · changes save automatically</small>
+      <small>Shared live squad · changes save automatically${isFriendlyFixture() ? " · no squad limit" : ""}</small>
     `;
   }
 
@@ -172,8 +176,8 @@
       if (current === "Present" || current === "Late" || current === "No Show") {
         next = "";
       } else {
-        if (selectedCount() >= 16) {
-          window.alert("Match squad is limited to 16 selected players.");
+        if (!isFriendlyFixture() && selectedCount() >= 16) {
+          window.alert("Match squad is limited to 16 selected players for competitive matches.");
           return;
         }
         next = "Present";
