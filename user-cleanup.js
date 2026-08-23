@@ -5,11 +5,13 @@
     const index = APP_USERS.findIndex(user => user?.name === "Ryan");
     if (index >= 0) APP_USERS.splice(index, 1);
 
-    // If this device had Ryan saved from an older version, force user selection
-    // rather than silently continuing as a removed user.
     if (localStorage.getItem(USER_STORAGE_KEY) === "Ryan") {
       localStorage.removeItem(USER_STORAGE_KEY);
+      currentUser = null;
     }
+
+    if (typeof renderUserOptions === "function") renderUserOptions();
+    if (typeof updateUserUi === "function") updateUserUi();
   } catch (error) {
     console.warn("Could not apply user cleanup", error);
   }
