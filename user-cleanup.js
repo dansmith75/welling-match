@@ -9,16 +9,29 @@
       currentUser = null;
     }
 
-    if (typeof renderUserOptions === "function") renderUserOptions();
-    if (typeof updateUserUi === "function") updateUserUi();
-
-    // Admin previously only exposed the manual Excel CSV export. That workflow
-    // is retired now Supabase is reconciled automatically by UPDATE-WELLING.
     const retireAdminUi = () => {
-      document.getElementById("admin-unlock")?.classList.add("hidden");
-      document.getElementById("admin-tools")?.classList.add("hidden");
+      if (adminUnlockButton) {
+        adminUnlockButton.classList.add("hidden");
+        adminUnlockButton.style.setProperty("display", "none", "important");
+      }
+      if (adminToolsElement) {
+        adminToolsElement.classList.add("hidden");
+        adminToolsElement.style.setProperty("display", "none", "important");
+      }
     };
-    retireAdminUi();
+
+    // app.js can subsequently call updateUserUi() during startup/user changes,
+    // which used to make Admin visible again for Dan. Keep the retired UI hidden
+    // after every future update as well as immediately.
+    const coreUpdateUserUi = updateUserUi;
+    updateUserUi = function () {
+      coreUpdateUserUi();
+      retireAdminUi();
+    };
+
+    if (typeof renderUserOptions === "function") renderUserOptions();
+    updateUserUi();
+
     window.addEventListener("load", retireAdminUi, { once: true });
   } catch (error) {
     console.warn("Could not apply user/admin cleanup", error);
