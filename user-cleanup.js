@@ -1,5 +1,4 @@
-// Current Match app users. Keep this as a small UI/data override so the core
-// attendance code can stay unchanged.
+// Current Match app users / retired admin UI.
 (() => {
   try {
     const index = APP_USERS.findIndex(user => user?.name === "Ryan");
@@ -12,7 +11,16 @@
 
     if (typeof renderUserOptions === "function") renderUserOptions();
     if (typeof updateUserUi === "function") updateUserUi();
+
+    // Admin previously only exposed the manual Excel CSV export. That workflow
+    // is retired now Supabase is reconciled automatically by UPDATE-WELLING.
+    const retireAdminUi = () => {
+      document.getElementById("admin-unlock")?.classList.add("hidden");
+      document.getElementById("admin-tools")?.classList.add("hidden");
+    };
+    retireAdminUi();
+    window.addEventListener("load", retireAdminUi, { once: true });
   } catch (error) {
-    console.warn("Could not apply user cleanup", error);
+    console.warn("Could not apply user/admin cleanup", error);
   }
 })();
