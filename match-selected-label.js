@@ -1,44 +1,349 @@
-// Match attendance wording only: keep stored/backend status as "Present"
-// for compatibility, but show managers "Selected" in the Match UI.
+// Shared Match squad selector.
+// Training remains the normal local attendance workflow. Match selections are
+// stored immediately in Supabase so Dan / managers see the same squad on every
+// device. Backend status stays "Present" for a normal selection so the existing
+// Matchday / Excel reconciliation remains compatible.
 (() => {
   const coreRenderPlayers = renderPlayers;
   const coreUpdateSummary = updateSummary;
+  const coreSetPlayerStatus = setPlayerStatus;
+  const coreClearSession = clearSession;
+
+  let sharedFixture = null;
+  let sharedClient = null;
+  let realtimeChannel = null;
+  let refreshTimer = null;
+  let loadingShared = false;
+  let lastSharedSnapshot = "";
+
+  function matchStatus(playerId) {
+    const status = getPlayerStatusForCurrentSession(playerId);
+    return ["Present", "Late", "No Show"].includes(status) ? status : "";
+  }
+
+  function isSelectedStatus(status) {
+    return ["Present", "Late", "No Show"].includes(status);
+  }
+
+  function formatFixtureDate(value) {
+    if (!value) return "";
+    const parts = String(value).slice(0, 10).split("-");
+    return parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : value;
+  }
+
+  async function resolveSharedFixture() {
+    try {
+      const url = window.WELLING_APP_CONFIG?.dashboardMatchesUrl || "matches.json";
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Fixtures ${response.status}`);
+      const matches = await response.json();
+      const today = todayAsLocalDate();
+      const unplayed = (Array.isArray(matches) ? matches : [])
+        .filter(match => !match.postponed && !match.result)
+        .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+      sharedFixture = unplayed.find(match => String(match.date || "") >= today) || unplayed[0] || null;
+      renderSharedFixtureBanner();
+      return sharedFixture;
+    } catch (error) {
+      console.error("Could not resolve shared Match fixture", error);
+      sharedFixture = null;
+      renderSharedFixtureBanner();
+      return null;
+    }
+  }
+
+  function ensureSharedClient() {
+    if (sharedClient) return sharedClient;
+    if (!isSupabaseConfigured()) return null;
+    sharedClient = getSupabaseClient();
+    return sharedClient;
+  }
+
+  function renderSharedFixtureBanner(message = "") {
+    let banner = document.getElementById("shared-squad-fixture");
+    if (!banner) {
+      banner = document.createElement("section");
+      banner.id = "shared-squad-fixture";
+      banner.className = "shared-squad-fixture hidden";
+      const summary = document.querySelector(".summary-bar");
+      summary?.insertAdjacentElement("afterend", banner);
+    }
+
+    if (!isMatch()) {
+      banner.classList.add("hidden");
+      return;
+    }
+
+    banner.classList.remove("hidden");
+    if (message) {
+      banner.innerHTML = `<strong>Match squad</strong><span>${message}</span>`;
+      return;
+    }
+
+    if (!sharedFixture) {
+      banner.innerHTML = `<strong>Match squad</strong><span>No upcoming fixture found</span>`;
+      return;
+    }
+
+    banner.innerHTML = `
+      <strong>${sharedFixture.opposition || "Next Match"}</strong>
+      <span>${formatFixtureDate(sharedFixture.date)} · ${sharedFixture.homeAway || sharedFixture.venue || ""} · ${sharedFixture.competition || ""}</span>
+      <small>Shared live squad · changes save automatically</small>
+    `;
+  }
+
+  async function loadSharedSquad(force = false) {
+    if (!isMatch() || loadingShared) return;
+    if (!sharedFixture) await resolveSharedFixture();
+    if (!sharedFixture) return;
+    const client = ensureSharedClient();
+    if (!client) {
+      renderSharedFixtureBanner("Supabase is not configured");
+      return;
+    }
+
+    loadingShared = true;
+    try {
+      const { data, error } = await client
+        .from("match_squad_selection")
+        .select("player_id, display_name, status, updated_by, updated_at")
+        .eq("fixture_id", sharedFixture.id)
+        .order("display_name", { ascending: true });
+      if (error) throw error;
+
+      const snapshot = JSON.stringify(data || []);
+      if (!force && snapshot === lastSharedSnapshot) return;
+      lastSharedSnapshot = snapshot;
+
+      attendance = {};
+      (data || []).forEach(row => {
+        if (isSelectedStatus(row.status)) attendance[row.player_id] = row.status;
+      });
+      renderPlayers();
+      updateSummary();
+      renderSharedFixtureBanner();
+    } catch (error) {
+      console.error("Shared squad load failed", error);
+      renderSharedFixtureBanner("Could not load shared squad — check connection");
+    } finally {
+      loadingShared = false;
+    }
+  }
+
+  async function saveSharedStatus(playerId, status) {
+    if (!sharedFixture) await resolveSharedFixture();
+    if (!sharedFixture) throw new Error("No upcoming fixture available");
+    const client = ensureSharedClient();
+    if (!client) throw new Error("Supabase is not configured");
+
+    const player = players.find(item => item.id === playerId);
+    if (!player) throw new Error("Player not found");
+
+    if (!status) {
+      const { error } = await client
+        .from("match_squad_selection")
+        .delete()
+        .eq("fixture_id", sharedFixture.id)
+        .eq("player_id", playerId);
+      if (error) throw error;
+      return;
+    }
+
+    const { error } = await client
+      .from("match_squad_selection")
+      .upsert({
+        fixture_id: sharedFixture.id,
+        player_id: playerId,
+        display_name: player.displayName,
+        status,
+        updated_by: getCurrentUserName(),
+        updated_at: new Date().toISOString()
+      }, { onConflict: "fixture_id,player_id" });
+    if (error) throw error;
+  }
+
+  function selectedCount() {
+    return players.filter(player => isSelectedStatus(matchStatus(player.id))).length;
+  }
+
+  async function setSharedPlayerStatus(playerId, requestedStatus) {
+    const current = matchStatus(playerId);
+    let next = current;
+
+    if (requestedStatus === "Present") {
+      if (current) {
+        next = ""; // Selected is the master toggle: turn squad selection off.
+      } else {
+        if (selectedCount() >= 16) {
+          window.alert("Match squad is limited to 16 selected players.");
+          return;
+        }
+        next = "Present";
+      }
+    } else if (requestedStatus === "Late" || requestedStatus === "No Show") {
+      if (!current) return; // Secondary states only exist once selected.
+      next = current === requestedStatus ? "Present" : requestedStatus;
+    }
+
+    const before = current;
+    if (next) attendance[playerId] = next;
+    else delete attendance[playerId];
+    renderPlayers();
+    updateSummary();
+
+    try {
+      await saveSharedStatus(playerId, next);
+      lastSharedSnapshot = "";
+    } catch (error) {
+      console.error("Shared squad save failed", error);
+      if (before) attendance[playerId] = before;
+      else delete attendance[playerId];
+      renderPlayers();
+      updateSummary();
+      window.alert("Could not save that squad change. Please check your connection and try again.");
+    }
+  }
+
+  setPlayerStatus = function (playerId, status) {
+    if (!isMatch()) return coreSetPlayerStatus(playerId, status);
+    return setSharedPlayerStatus(playerId, status);
+  };
 
   renderPlayers = function () {
-    coreRenderPlayers();
-    if (!isMatch()) return;
+    if (!isMatch()) return coreRenderPlayers();
 
-    document.querySelectorAll('.status-button').forEach((button) => {
-      if (button.textContent.trim() === 'Present') {
-        button.textContent = 'Selected';
-        button.setAttribute('aria-label', 'Selected');
+    playerListElement.innerHTML = "";
+    players.forEach(player => {
+      const current = matchStatus(player.id);
+      const selected = Boolean(current);
+      const card = document.createElement("article");
+      card.className = `player-card${selected ? " shared-selected-player" : ""}`;
+
+      const name = document.createElement("div");
+      name.className = "player-name";
+      name.textContent = player.displayName;
+
+      const buttonGrid = document.createElement("div");
+      buttonGrid.className = "status-buttons shared-squad-buttons";
+      buttonGrid.style.setProperty("--button-count", selected ? 3 : 1);
+      buttonGrid.classList.add(`button-count-${selected ? 3 : 1}`);
+
+      const selectedButton = document.createElement("button");
+      selectedButton.className = "status-button status-present";
+      selectedButton.type = "button";
+      selectedButton.textContent = "Selected";
+      if (selected) selectedButton.classList.add("selected");
+      selectedButton.addEventListener("click", () => setPlayerStatus(player.id, "Present"));
+      buttonGrid.appendChild(selectedButton);
+
+      if (selected) {
+        ["Late", "No Show"].forEach(status => {
+          const button = document.createElement("button");
+          button.className = `status-button status-${status.toLowerCase().replace(/\s+/g, "-")}`;
+          button.type = "button";
+          button.textContent = status;
+          if (current === status) button.classList.add("selected");
+          button.addEventListener("click", () => setPlayerStatus(player.id, status));
+          buttonGrid.appendChild(button);
+        });
       }
+
+      card.appendChild(name);
+      card.appendChild(buttonGrid);
+      playerListElement.appendChild(card);
     });
   };
 
   updateSummary = function () {
-    coreUpdateSummary();
-    if (!isMatch()) return;
-
-    const summary = document.getElementById('summary-present');
-    if (summary) {
-      summary.textContent = summary.textContent.replace(/present/i, 'selected');
-    }
+    if (!isMatch()) return coreUpdateSummary();
+    const count = selectedCount();
+    summaryTotalElement.textContent = `${players.length} players`;
+    summaryPresentElement.textContent = `${count} selected`;
+    summaryMissingElement.textContent = `${players.length - count} not selected`;
+    renderSharedFixtureBanner();
   };
 
-  // Update the Matchday help copy without changing the underlying attendance values.
-  document.querySelectorAll('.matchday-help').forEach((element) => {
+  clearSession = function () {
+    if (!isMatch()) return coreClearSession();
+    window.alert("Match selections are shared. Untoggle Selected on a player to remove them from the squad.");
+  };
+
+  function stopSharedSync() {
+    if (refreshTimer) {
+      clearInterval(refreshTimer);
+      refreshTimer = null;
+    }
+    if (realtimeChannel && sharedClient) {
+      try { sharedClient.removeChannel(realtimeChannel); } catch (_) {}
+      realtimeChannel = null;
+    }
+  }
+
+  async function startSharedSync() {
+    stopSharedSync();
+    if (!isMatch()) {
+      renderSharedFixtureBanner();
+      return;
+    }
+    await resolveSharedFixture();
+    await loadSharedSquad(true);
+    const client = ensureSharedClient();
+    if (client && sharedFixture) {
+      try {
+        realtimeChannel = client
+          .channel(`match-squad-${sharedFixture.id}`)
+          .on("postgres_changes", {
+            event: "*",
+            schema: "public",
+            table: "match_squad_selection",
+            filter: `fixture_id=eq.${sharedFixture.id}`
+          }, () => loadSharedSquad(true))
+          .subscribe();
+      } catch (error) {
+        console.warn("Realtime squad sync unavailable; polling will continue", error);
+      }
+    }
+    refreshTimer = setInterval(() => loadSharedSquad(false), 5000);
+  }
+
+  sessionTypeElements.forEach(element => {
+    element.addEventListener("change", () => {
+      if (element.checked && element.value === "Match") startSharedSync();
+      if (element.checked && element.value === "Training") {
+        stopSharedSync();
+        renderSharedFixtureBanner();
+      }
+    });
+  });
+
+  // Matchday help copy only; the stored status intentionally remains Present.
+  document.querySelectorAll(".matchday-help").forEach(element => {
     element.textContent = element.textContent.replace(
-      'Players marked Present or Late on the Match attendance screen are included automatically.',
-      'Players marked Selected or Late on the Match attendance screen are included automatically.'
+      "Players marked Present or Late on the Match attendance screen are included automatically.",
+      "Players marked Selected or Late on the Match attendance screen are included automatically."
     );
   });
 
-  // Re-render once so the current screen picks up the new wording immediately.
-  try {
-    renderPlayers();
-    updateSummary();
-  } catch (_) {
-    // app.js will render normally during startup if data is not ready yet.
-  }
+  const style = document.createElement("style");
+  style.textContent = `
+    .shared-squad-fixture{margin:0 0 14px;padding:13px 16px;border:1px solid rgba(59,130,246,.28);border-radius:14px;background:rgba(37,99,235,.08);display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+    .shared-squad-fixture.hidden{display:none}
+    .shared-squad-fixture strong{font-size:16px}.shared-squad-fixture span{color:var(--muted,#64748b)}.shared-squad-fixture small{margin-left:auto;color:var(--muted,#64748b)}
+    .shared-squad-buttons.button-count-1{grid-template-columns:1fr}.shared-squad-buttons.button-count-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+    @media(max-width:640px){.shared-squad-fixture{align-items:flex-start;flex-direction:column;gap:4px}.shared-squad-fixture small{margin-left:0}.shared-squad-buttons.button-count-3{grid-template-columns:repeat(3,minmax(0,1fr))}}
+  `;
+  document.head.appendChild(style);
+
+  // app.js init is asynchronous. Wait until players are available, then honour
+  // a previously saved Match tab and replace any device-local Match marks with
+  // the shared Supabase squad.
+  let bootAttempts = 0;
+  const boot = setInterval(() => {
+    bootAttempts += 1;
+    if (players.length || bootAttempts > 40) {
+      clearInterval(boot);
+      if (isMatch()) startSharedSync();
+      else renderSharedFixtureBanner();
+    }
+  }, 100);
 })();
