@@ -20,7 +20,6 @@
 
   const style = document.createElement("style");
   style.textContent = `
-    /* One layout system only: each scoreboard half is label, centred content, action row. */
     .matchday-score-grid { align-items:stretch!important; }
     .matchday-time-panel,
     .matchday-result-panel {
@@ -55,10 +54,11 @@
     }
     .matchday-time-panel #matchday-clock-state { margin-top:14px!important; }
 
+    /* Both panels reserve the exact same 110px action row. */
     .matchday-panel-controls {
-      flex:0 0 74px!important;
-      height:74px!important;
-      min-height:74px!important;
+      flex:0 0 110px!important;
+      height:110px!important;
+      min-height:110px!important;
       width:100%!important;
       margin-top:18px!important;
       display:flex!important;
@@ -72,6 +72,7 @@
       width:min(82%,360px)!important;
       display:grid!important;
       grid-template-columns:minmax(0,1fr)!important;
+      align-items:stretch!important;
       gap:10px!important;
       margin-left:auto!important;
       margin-right:auto!important;
@@ -85,8 +86,9 @@
       width:100%!important;
       max-width:none!important;
       min-width:0!important;
-      height:74px!important;
-      min-height:74px!important;
+      height:110px!important;
+      min-height:110px!important;
+      align-self:stretch!important;
       margin:0!important;
       padding:10px 12px!important;
       box-sizing:border-box!important;
@@ -104,8 +106,9 @@
     #matchday-result-controls .matchday-formation-live {
       width:min(82%,360px)!important;
       max-width:none!important;
-      height:74px!important;
-      min-height:74px!important;
+      height:110px!important;
+      min-height:110px!important;
+      align-self:stretch!important;
       margin:0!important;
       position:static!important;
       transform:none!important;
@@ -122,9 +125,9 @@
         padding:12px 10px 14px!important;
       }
       .matchday-panel-controls {
-        flex-basis:68px!important;
-        height:68px!important;
-        min-height:68px!important;
+        flex-basis:96px!important;
+        height:96px!important;
+        min-height:96px!important;
         margin-top:14px!important;
       }
       #matchday-timer-controls { width:86%!important; }
@@ -132,8 +135,8 @@
       .matchday-time-panel #matchday-pause,
       .matchday-time-panel #matchday-start-second-half,
       #matchday-result-controls .matchday-formation-live {
-        height:68px!important;
-        min-height:68px!important;
+        height:96px!important;
+        min-height:96px!important;
       }
     }
   `;
@@ -188,7 +191,6 @@
 
   function refreshHalfTimeControls() {
     if (!ensureStableScoreboardStructure()) return;
-
     const paused = state.status === "paused";
     const active = state.status === "running" || paused;
     const firstHalf = Number(state.period || 1) === 1;
@@ -197,13 +199,9 @@
     md.pause.classList.toggle("hidden", !active);
     md.pause.textContent = paused ? "Resume" : "Pause / Halftime";
     if (md.resume) md.resume.classList.add("hidden");
-
     secondHalfButton.classList.toggle("hidden", !showSecondHalf);
     timerControls.classList.toggle("two-buttons", showSecondHalf);
-
-    if (paused && md.clockState) {
-      md.clockState.textContent = firstHalf ? "Paused / Halftime" : "Paused";
-    }
+    if (paused && md.clockState) md.clockState.textContent = firstHalf ? "Paused / Halftime" : "Paused";
   }
 
   md.pause?.addEventListener("click", event => {
@@ -218,11 +216,7 @@
 
   secondHalfButton.addEventListener("click", () => {
     if (state.status !== "paused" || Number(state.period || 1) !== 1) return;
-
-    const playedAtSecondHalfKickoff = typeof elapsedSeconds === "function"
-      ? elapsedSeconds()
-      : Number(state.accumulatedSeconds || 0);
-
+    const playedAtSecondHalfKickoff = typeof elapsedSeconds === "function" ? elapsedSeconds() : Number(state.accumulatedSeconds || 0);
     state.period = 2;
     state.secondHalfStartElapsed = playedAtSecondHalfKickoff;
     state.halfTimePlayedSeconds = playedAtSecondHalfKickoff;
@@ -231,7 +225,6 @@
     state.pauseStartedAt = null;
     state.status = "running";
     state.lastResumeEpoch = Date.now();
-
     if (typeof saveState === "function") saveState();
     if (typeof renderLive === "function") renderLive();
     if (typeof startTicker === "function") startTicker();
