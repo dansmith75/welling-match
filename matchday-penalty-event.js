@@ -1,5 +1,6 @@
 // Adds Penalty as a quick Matchday event. A penalty is recorded against the
-// player it was awarded to, so it survives into the editable timeline and Excel Events.
+// player it was awarded to, with an outcome (awarded/scored/missed) so it survives
+// into the editable timeline and Excel Events.
 (() => {
   if (typeof state === "undefined" || typeof md === "undefined") return;
 
@@ -18,6 +19,9 @@
     .md-penalty-player{min-height:58px;border:1px solid var(--border);border-radius:13px;background:#fff;font-weight:900;padding:10px}
     .md-penalty-minute{display:grid;gap:6px;margin:0 0 14px;font-weight:900}
     .md-penalty-minute input{width:100%;font-size:16px;border:1px solid var(--border);border-radius:11px;padding:12px;background:#fff}
+    .md-penalty-outcome{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 16px}
+    .md-penalty-outcome button{min-height:54px;border-radius:13px;border:1px solid var(--border);background:#fff;font-weight:900}
+    .md-penalty-outcome button.selected{background:#111827;color:#fff;border-color:#111827}
     @media(max-width:520px){.md4-event-actions{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
   `;
   document.head.appendChild(style);
@@ -43,16 +47,30 @@
 
   const body = overlay.querySelector("#md-penalty-body");
   const currentMinute = () => Math.max(0, Math.floor(typeof matchMinute === "function" ? matchMinute() : 0));
+  let outcome = "Awarded";
 
   function openPenalty() {
     const minute = currentMinute();
+    outcome = "Awarded";
     body.innerHTML = `
-      <p class="md4-score-summary">Penalty awarded · ${minute}'</p>
+      <p class="md4-score-summary">Penalty · ${minute}'</p>
       <label class="md-penalty-minute">Minute
         <input id="md-penalty-minute" type="number" min="0" step="1" value="${minute}">
       </label>
+      <p class="matchday-help"><strong>Outcome</strong></p>
+      <div class="md-penalty-outcome">
+        <button type="button" data-outcome="Awarded" class="selected">Awarded</button>
+        <button type="button" data-outcome="Missed">Missed</button>
+      </div>
       <p class="matchday-help"><strong>Who was the penalty awarded to?</strong></p>
       <div class="md-penalty-grid" id="md-penalty-players"></div>`;
+
+    body.querySelectorAll("[data-outcome]").forEach(outcomeButton => {
+      outcomeButton.addEventListener("click", () => {
+        outcome = outcomeButton.dataset.outcome || "Awarded";
+        body.querySelectorAll("[data-outcome]").forEach(item => item.classList.toggle("selected", item === outcomeButton));
+      });
+    });
 
     const grid = body.querySelector("#md-penalty-players");
     const ids = state.lineupIds?.length ? state.lineupIds : state.squadIds;
@@ -71,12 +89,14 @@
     const fallback = currentMinute();
     const raw = Number(body.querySelector("#md-penalty-minute")?.value);
     const minute = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : fallback;
+    const missed = outcome === "Missed";
     state.events.push({
       type: "Note",
       playerId,
       minute,
-      text: "Penalty awarded",
+      text: missed ? "Penalty missed" : "Penalty awarded",
       eventKind: "Penalty",
+      penaltyOutcome: outcome,
       recordedAt: new Date().toISOString()
     });
     saveState();
