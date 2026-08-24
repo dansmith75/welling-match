@@ -1,8 +1,10 @@
 // User-facing refresh control. Reloads the site using a unique URL so the latest
 // GitHub Pages HTML/data is requested without users needing Ctrl+F5.
 (() => {
+  const userLine = document.querySelector('.current-user-line');
   const header = document.querySelector('.app-header');
-  if (!header || document.getElementById('hard-refresh-button')) return;
+  const host = userLine || header;
+  if (!host || document.getElementById('hard-refresh-button')) return;
 
   const button = document.createElement('button');
   button.id = 'hard-refresh-button';
@@ -14,13 +16,12 @@
 
   const style = document.createElement('style');
   style.textContent = `
-    .app-header { position:relative; }
+    .current-user-line { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
     .hard-refresh-button {
-      position:absolute;
-      top:14px;
-      right:14px;
-      width:46px;
-      height:46px;
+      position:static!important;
+      flex:0 0 auto;
+      width:34px;
+      height:34px;
       border:1px solid rgba(255,255,255,.45);
       border-radius:50%;
       background:rgba(255,255,255,.14);
@@ -28,8 +29,9 @@
       display:grid;
       place-items:center;
       padding:0;
+      margin-left:2px;
       cursor:pointer;
-      font:900 30px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      font:900 22px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
       box-shadow:0 2px 8px rgba(0,0,0,.12);
       -webkit-tap-highlight-color:transparent;
     }
@@ -38,12 +40,12 @@
     .hard-refresh-button.refreshing span { animation:welling-refresh-spin .7s linear infinite; }
     @keyframes welling-refresh-spin { to { transform:rotate(360deg); } }
     @media(max-width:520px){
-      .hard-refresh-button { top:10px; right:10px; width:42px; height:42px; font-size:27px; }
+      .hard-refresh-button { width:32px; height:32px; font-size:21px; }
     }
     @media(prefers-reduced-motion:reduce){ .hard-refresh-button.refreshing span { animation:none; } }
   `;
   document.head.appendChild(style);
-  header.appendChild(button);
+  host.appendChild(button);
 
   button.addEventListener('click', async () => {
     if (button.disabled) return;
