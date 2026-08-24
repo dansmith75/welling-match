@@ -26,19 +26,19 @@
       grid-template-rows:auto minmax(118px,auto) minmax(48px,auto) 74px!important;
       align-items:center!important;
       position:relative!important;
-      padding-bottom:90px!important;
+      padding-bottom:104px!important;
     }
     .matchday-time-panel .matchday-score-panel-label,
     .matchday-result-panel .matchday-score-panel-label { grid-row:1!important; }
     .matchday-time-panel #matchday-clock { grid-row:2!important; }
     .matchday-time-panel #matchday-clock-state { grid-row:3!important; }
 
-    /* Pin both action areas to the exact same baseline. */
+    /* Keep both action areas on the same baseline, safely inside the red panel. */
     .matchday-time-panel #matchday-timer-controls,
     .matchday-result-panel .matchday-formation-live {
       position:absolute!important;
       left:50%!important;
-      bottom:0!important;
+      bottom:18px!important;
       transform:translateX(-50%)!important;
       height:74px!important;
       min-height:74px!important;
@@ -91,10 +91,11 @@
       .matchday-time-panel,
       .matchday-result-panel{
         grid-template-rows:auto minmax(108px,auto) minmax(44px,auto) 68px!important;
-        padding-bottom:82px!important;
+        padding-bottom:94px!important;
       }
       .matchday-time-panel #matchday-timer-controls,
       .matchday-result-panel .matchday-formation-live{
+        bottom:14px!important;
         height:68px!important;
         min-height:68px!important;
       }
