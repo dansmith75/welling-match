@@ -1,4 +1,4 @@
-// Matchday pause / half-time behaviour and scoreboard alignment.
+// Matchday pause / half-time behaviour with a stable scoreboard action row.
 (() => {
   if (typeof state === "undefined" || typeof md === "undefined") return;
 
@@ -15,50 +15,75 @@
   if (!timerControls) {
     timerControls = document.createElement("div");
     timerControls.id = "matchday-timer-controls";
-    timerControls.className = "matchday-timer-controls";
+    timerControls.className = "matchday-panel-controls matchday-timer-controls";
   }
 
   const style = document.createElement("style");
   style.textContent = `
+    /* One layout system only: each scoreboard half is label, centred content, action row. */
+    .matchday-score-grid { align-items:stretch!important; }
     .matchday-time-panel,
     .matchday-result-panel {
-      display:grid!important;
-      grid-template-rows:auto minmax(118px,auto) minmax(48px,auto) 74px!important;
-      align-items:center!important;
-      position:relative!important;
-      padding-bottom:104px!important;
+      display:flex!important;
+      flex-direction:column!important;
+      align-items:stretch!important;
+      min-height:390px!important;
+      padding:14px 16px 18px!important;
+      box-sizing:border-box!important;
+      position:static!important;
     }
-    .matchday-time-panel .matchday-score-panel-label,
-    .matchday-result-panel .matchday-score-panel-label { grid-row:1!important; }
-    .matchday-time-panel #matchday-clock { grid-row:2!important; }
-    .matchday-time-panel #matchday-clock-state { grid-row:3!important; }
-
-    /* Keep both action areas on the same baseline, safely inside the red panel. */
-    .matchday-time-panel #matchday-timer-controls,
-    .matchday-result-panel .matchday-formation-live {
-      position:absolute!important;
-      left:50%!important;
-      bottom:18px!important;
-      transform:translateX(-50%)!important;
-      height:74px!important;
-      min-height:74px!important;
-      margin:0!important;
+    .matchday-score-panel-label {
+      flex:0 0 auto!important;
+      align-self:center!important;
+      margin-bottom:8px!important;
+    }
+    .matchday-panel-main {
+      flex:1 1 auto!important;
+      min-height:0!important;
+      width:100%!important;
+      display:flex!important;
+      flex-direction:column!important;
+      align-items:center!important;
+      justify-content:center!important;
       box-sizing:border-box!important;
     }
+    .matchday-time-panel #matchday-clock,
+    .matchday-time-panel #matchday-clock-state,
+    .matchday-result-panel #matchday-team-score {
+      position:static!important;
+      transform:none!important;
+    }
+    .matchday-time-panel #matchday-clock-state { margin-top:14px!important; }
 
-    .matchday-time-panel #matchday-timer-controls {
+    .matchday-panel-controls {
+      flex:0 0 74px!important;
+      height:74px!important;
+      min-height:74px!important;
+      width:100%!important;
+      margin-top:18px!important;
+      display:flex!important;
+      align-items:stretch!important;
+      justify-content:center!important;
+      box-sizing:border-box!important;
+      position:static!important;
+      transform:none!important;
+    }
+    #matchday-timer-controls {
       width:min(82%,360px)!important;
       display:grid!important;
       grid-template-columns:minmax(0,1fr)!important;
       gap:10px!important;
+      margin-left:auto!important;
+      margin-right:auto!important;
     }
-    .matchday-time-panel #matchday-timer-controls.two-buttons {
-      width:min(96%,520px)!important;
+    #matchday-timer-controls.two-buttons {
+      width:min(100%,520px)!important;
       grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
     }
     .matchday-time-panel #matchday-pause,
     .matchday-time-panel #matchday-start-second-half {
       width:100%!important;
+      max-width:none!important;
       min-width:0!important;
       height:74px!important;
       min-height:74px!important;
@@ -76,49 +101,93 @@
     .matchday-time-panel #matchday-pause.hidden,
     .matchday-time-panel #matchday-start-second-half.hidden { display:none!important; }
 
-    .matchday-result-panel .matchday-formation-live {
+    #matchday-result-controls .matchday-formation-live {
       width:min(82%,360px)!important;
+      max-width:none!important;
+      height:74px!important;
+      min-height:74px!important;
+      margin:0!important;
+      position:static!important;
+      transform:none!important;
       display:flex!important;
       align-items:center!important;
       justify-content:center!important;
-    }
-    .matchday-result-panel #matchday-team-score {
-      grid-row:2 / span 2!important;
-      align-self:center!important;
+      box-sizing:border-box!important;
     }
 
     @media(max-width:520px){
       .matchday-time-panel,
-      .matchday-result-panel{
-        grid-template-rows:auto minmax(108px,auto) minmax(44px,auto) 68px!important;
-        padding-bottom:94px!important;
+      .matchday-result-panel {
+        min-height:340px!important;
+        padding:12px 10px 14px!important;
       }
-      .matchday-time-panel #matchday-timer-controls,
-      .matchday-result-panel .matchday-formation-live{
-        bottom:14px!important;
+      .matchday-panel-controls {
+        flex-basis:68px!important;
+        height:68px!important;
+        min-height:68px!important;
+        margin-top:14px!important;
+      }
+      #matchday-timer-controls { width:86%!important; }
+      #matchday-timer-controls.two-buttons { width:100%!important; gap:8px!important; }
+      .matchday-time-panel #matchday-pause,
+      .matchday-time-panel #matchday-start-second-half,
+      #matchday-result-controls .matchday-formation-live {
         height:68px!important;
         min-height:68px!important;
       }
-      .matchday-time-panel #matchday-timer-controls{width:86%!important}
-      .matchday-time-panel #matchday-timer-controls.two-buttons{width:100%!important;gap:8px!important}
-      .matchday-time-panel #matchday-pause,
-      .matchday-time-panel #matchday-start-second-half{min-height:68px!important;height:68px!important}
     }
   `;
   document.head.appendChild(style);
 
-  function ensureTimerControlsInPanel() {
+  function ensureStableScoreboardStructure() {
     const timePanel = document.querySelector(".matchday-time-panel");
-    if (!timePanel || !md.pause) return false;
+    const resultPanel = document.querySelector(".matchday-result-panel");
+    const score = document.getElementById("matchday-team-score");
+    const formation = document.getElementById("matchday-formation-live");
+    if (!timePanel || !resultPanel || !md.pause || !score) return false;
 
+    let timeMain = document.getElementById("matchday-time-main");
+    if (!timeMain) {
+      timeMain = document.createElement("div");
+      timeMain.id = "matchday-time-main";
+      timeMain.className = "matchday-panel-main";
+    }
+    if (timeMain.parentElement !== timePanel) {
+      const label = timePanel.querySelector(".matchday-score-panel-label");
+      label?.insertAdjacentElement("afterend", timeMain);
+    }
+    if (md.clock?.parentElement !== timeMain) timeMain.appendChild(md.clock);
+    if (md.clockState?.parentElement !== timeMain) timeMain.appendChild(md.clockState);
     if (timerControls.parentElement !== timePanel) timePanel.appendChild(timerControls);
     if (md.pause.parentElement !== timerControls) timerControls.appendChild(md.pause);
     if (secondHalfButton.parentElement !== timerControls) timerControls.appendChild(secondHalfButton);
+
+    let resultMain = document.getElementById("matchday-result-main");
+    if (!resultMain) {
+      resultMain = document.createElement("div");
+      resultMain.id = "matchday-result-main";
+      resultMain.className = "matchday-panel-main";
+    }
+    if (resultMain.parentElement !== resultPanel) {
+      const label = resultPanel.querySelector(".matchday-score-panel-label");
+      label?.insertAdjacentElement("afterend", resultMain);
+    }
+    if (score.parentElement !== resultMain) resultMain.appendChild(score);
+
+    let resultControls = document.getElementById("matchday-result-controls");
+    if (!resultControls) {
+      resultControls = document.createElement("div");
+      resultControls.id = "matchday-result-controls";
+      resultControls.className = "matchday-panel-controls";
+    }
+    if (resultControls.parentElement !== resultPanel) resultPanel.appendChild(resultControls);
+    if (formation && formation.parentElement !== resultControls) resultControls.appendChild(formation);
+
     return true;
   }
 
   function refreshHalfTimeControls() {
-    if (!ensureTimerControlsInPanel()) return;
+    if (!ensureStableScoreboardStructure()) return;
 
     const paused = state.status === "paused";
     const active = state.status === "running" || paused;
@@ -141,6 +210,9 @@
     if (state.status !== "paused") return;
     event.preventDefault();
     event.stopImmediatePropagation();
+    state.pauseReason = null;
+    state.pauseStartedAt = null;
+    if (typeof saveState === "function") saveState();
     if (typeof resumeMatch === "function") resumeMatch();
   }, true);
 
@@ -155,6 +227,8 @@
     state.secondHalfStartElapsed = playedAtSecondHalfKickoff;
     state.halfTimePlayedSeconds = playedAtSecondHalfKickoff;
     state.secondHalfStartedAt = new Date().toISOString();
+    state.pauseReason = null;
+    state.pauseStartedAt = null;
     state.status = "running";
     state.lastResumeEpoch = Date.now();
 
