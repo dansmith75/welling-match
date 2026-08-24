@@ -61,6 +61,8 @@ function emptyMatchdayState() {
     status: "setup",
     accumulatedSeconds: 0,
     lastResumeEpoch: null,
+    period: 1,
+    secondHalfStartElapsed: null,
     substitutions: [],
     events: [],
     intervals: {},
@@ -106,11 +108,45 @@ function elapsedSeconds() {
   return Math.max(0, seconds);
 }
 
-const matchMinute = () => Math.floor(elapsedSeconds() / 60);
+// Played seconds remain continuous for accurate player minutes. The visible match
+// clock is separate: once the second half starts it begins again from 45:00,
+// regardless of first-half stoppage time.
+function matchClockSeconds() {
+  const played = elapsedSeconds();
+  if (Number(state.period || 1) === 2 && Number.isFinite(Number(state.secondHalfStartElapsed))) {
+    return 45 * 60 + Math.max(0, played - Number(state.secondHalfStartElapsed));
+  }
+  return played;
+}
+
+const matchMinute = () => Math.floor(matchClockSeconds() / 60);
+
 function formatClock(seconds) {
   if (Number(seconds || 0) > MATCHDAY_SAFETY_SECONDS) return "180:00+";
   const total = Math.max(0, Math.floor(seconds));
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function formatMatchClock() {
+  const total = Math.max(0, Math.floor(matchClockSeconds()));
+  const period = Number(state.period || 1);
+  if (period === 1 && total >= 45 * 60) {
+    const extra = total - 45 * 60;
+    return `45+${String(Math.floor(extra / 60)).padStart(2, "0")}:${String(extra % 60).padStart(2, "0")}`;
+  }
+  if (period === 2 && total >= 90 * 60) {
+    const extra = total - 90 * 60;
+    return `90+${String(Math.floor(extra / 60)).padStart(2, "0")}:${String(extra % 60).padStart(2, "0")}`;
+  }
+  return formatClock(total);
+}
+
+function officialMinuteToPlayedSecond(minute) {
+  const officialSecond = Math.max(0, Number(minute || 0) * 60);
+  if (Number(state.period || 1) === 2 && Number.isFinite(Number(state.secondHalfStartElapsed))) {
+    return Number(state.secondHalfStartElapsed) + Math.max(0, officialSecond - 45 * 60);
+  }
+  return officialSecond;
 }
 
 function attendanceSquadIds() {
@@ -219,85 +255,66 @@ function buildV3Ui() {
   if (!cancel) {
     cancel = document.createElement("button");
     cancel.id = "matchday-cancel";
+    cancel.className = "danger-button matchday-wide";
     cancel.type = "button";
     cancel.textContent = "Cancel Matchday";
+    md.live.appendChild(cancel);
   }
-  cancel.className = "danger-button matchday-wide matchday-cancel-bottom";
-  md.live.appendChild(cancel);
   md.cancel = cancel;
 
-  const overlay = document.createElement("div");
-  overlay.id = "matchday-correction-overlay";
-  overlay.className = "matchday-correction-overlay hidden";
-  overlay.innerHTML = `<div class="matchday-correction-dialog">
-    <strong id="matchday-correction-title">Recorded item</strong>
-    <button id="matchday-correction-edit" class="secondary-button" type="button">Edit</button>
-    <button id="matchday-correction-delete" class="danger-button" type="button">Delete</button>
-    <button id="matchday-correction-cancel" class="small-button" type="button">Cancel</button>
-  </div>`;
-  document.body.appendChild(overlay);
-  md.correctionOverlay = overlay;
+  const correctionOverlay = document.createElement("div");
+  correctionOverlay.id = "matchday-correction-overlay";
+  correctionOverlay.className = "matchday-correction-overlay hidden";
+  correctionOverlay.innerHTML = `<div class="matchday-correction-card"><h3 id="matchday-correction-title">Correct item</h3><div class="matchday-correction-actions"><button id="matchday-correction-edit" class="secondary-button" type="button">Edit</button><button id="matchday-correction-delete" class="danger-button" type="button">Delete</button><button id="matchday-correction-cancel" class="small-button" type="button">Cancel</button></div></div>`;
+  document.body.appendChild(correctionOverlay);
+  md.correctionOverlay = correctionOverlay;
   md.correctionTitle = document.getElementById("matchday-correction-title");
   md.correctionEdit = document.getElementById("matchday-correction-edit");
   md.correctionDelete = document.getElementById("matchday-correction-delete");
   md.correctionCancel = document.getElementById("matchday-correction-cancel");
 }
 
-function renderFixtures() {
+function renderSetup() {
+  const f = fixture();
   md.fixture.innerHTML = "";
-  matchdayFixtures.forEach(f => {
+  matchdayFixtures.filter(item => !item.result && !item.postponed).forEach(item => {
     const option = document.createElement("option");
-    option.value = f.id;
-    option.textContent = labelFixture(f);
+    option.value = item.id;
+    option.textContent = labelFixture(item);
     md.fixture.appendChild(option);
   });
-  if (!state.fixtureId && matchdayFixtures.length) {
-    const today = new Date().toISOString().slice(0, 10);
-    state.fixtureId = (matchdayFixtures.find(f => f.date >= today) || matchdayFixtures[0]).id;
-  }
-  md.fixture.value = state.fixtureId || "";
-  const f = fixture();
-  md.fixtureMeta.textContent = f ? `${f.competition || "Competition TBC"} · ${f.venue || "Venue TBC"}` : "Select a fixture.";
-  saveState();
-}
-
-function toggleStarter(id) {
-  if (state.starterIds.includes(id)) {
-    state.starterIds = state.starterIds.filter(x => x !== id);
-  } else {
-    if (state.starterIds.length >= MATCHDAY_STARTERS) return window.alert("Starting lineup is limited to 11 players.");
-    state.starterIds.push(id);
-  }
-  saveState();
+  if (state.fixtureId && [...md.fixture.options].some(o => o.value === state.fixtureId)) md.fixture.value = state.fixtureId;
+  else if (md.fixture.options.length) { state.fixtureId = md.fixture.options[0].value; saveState(); }
+  const current = fixture();
+  md.fixtureMeta.textContent = current ? `${current.venue || ""}${current.competition ? ` · ${current.competition}` : ""}` : "No upcoming fixture";
+  syncSetupSquad();
+  md.squadCount.textContent = `${state.squadIds.length} players from Attendance`;
   renderStarters();
 }
 
 function renderStarters() {
   md.starterList.innerHTML = "";
-  const squad = matchdayPlayers.filter(p => state.squadIds.includes(p.id));
-  md.squadCount.textContent = `${squad.length} player${squad.length === 1 ? "" : "s"} from Attendance`;
-  md.starterCount.textContent = `${state.starterIds.length} selected`;
-  squad.forEach(p => {
+  state.squadIds.forEach(id => {
+    const p = player(id);
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `matchday-player-choice${state.starterIds.includes(p.id) ? " selected" : ""}`;
-    button.textContent = p.position ? `${p.displayName} · ${p.position}` : p.displayName;
-    button.addEventListener("click", () => toggleStarter(p.id));
+    button.className = `matchday-player-button${state.starterIds.includes(id) ? " selected" : ""}`;
+    button.textContent = p ? `${p.displayName}${p.position ? ` · ${p.position}` : ""}` : id;
+    button.addEventListener("click", () => {
+      if (state.starterIds.includes(id)) state.starterIds = state.starterIds.filter(x => x !== id);
+      else if (state.starterIds.length < MATCHDAY_STARTERS) state.starterIds.push(id);
+      else return window.alert("Starting lineup is limited to 11 players.");
+      saveState(); renderStarters();
+    });
     md.starterList.appendChild(button);
   });
-}
-
-function renderSetup() {
-  syncSetupSquad();
-  renderFixtures();
-  renderStarters();
+  md.starterCount.textContent = `${state.starterIds.length} selected`;
 }
 
 function openInterval(id, second) {
   state.intervals[id] ||= [];
   state.intervals[id].push({ start: second, end: null });
 }
-
 function closeInterval(id, second) {
   const current = [...(state.intervals[id] || [])].reverse().find(i => i.end === null);
   if (!current || second < current.start) return false;
@@ -319,6 +336,8 @@ function startMatch() {
     status: "running",
     accumulatedSeconds: 0,
     lastResumeEpoch: now,
+    period: 1,
+    secondHalfStartElapsed: null,
     startedAt: new Date(now).toISOString(),
     finishedAt: null,
     substitutions: [],
@@ -402,12 +421,12 @@ function addSubstitution() {
   const on = md.subOn.value;
   if (!off || !on || off === on) return window.alert("Choose a player off and a different player on.");
   const minute = Math.max(0, Math.floor(Number(md.subMinute.value) || matchMinute()));
-  const second = Math.min(minute * 60, elapsedSeconds());
+  const second = Math.min(officialMinuteToPlayedSecond(minute), elapsedSeconds());
   if (!closeInterval(off, second)) return window.alert("That substitution minute is before this player's current spell.");
   openInterval(on, second);
   state.lineupIds = state.lineupIds.filter(id => id !== off);
   state.lineupIds.push(on);
-  state.substitutions.push({ minute: Math.floor(second / 60), second: Math.round(second), off, on });
+  state.substitutions.push({ minute, second: Math.round(second), period: Number(state.period || 1), off, on });
   saveState();
   renderLive();
   saveRecovery("substitution");
@@ -418,7 +437,7 @@ function addGoal() {
   const scorer = md.goalPlayer.value;
   if (!scorer) return window.alert("Choose the goal scorer.");
   const goalType = md.goalType.value;
-  const event = { type: "Goal", playerId: scorer, minute: Math.max(0, Math.floor(Number(md.goalMinute.value) || matchMinute())), goalType };
+  const event = { type: "Goal", playerId: scorer, minute: Math.max(0, Math.floor(Number(md.goalMinute.value) || matchMinute())), period: Number(state.period || 1), second: Math.round(elapsedSeconds()), goalType };
   if (goalType === "Open Play" && md.goalAssist.value) event.assistPlayerId = md.goalAssist.value;
   state.events.push(event);
   saveState();
@@ -431,14 +450,15 @@ function addPlayerEvent() {
   const playerId = md.eventPlayer.value;
   if (!playerId) return window.alert("Choose the player.");
   const minute = Math.max(0, Math.floor(Number(md.eventMinute.value) || matchMinute()));
+  const common = { playerId, minute, period: Number(state.period || 1), second: Math.round(elapsedSeconds()) };
   if (md.eventType.value === "Event") {
     const input = document.getElementById("matchday-player-event-text");
     const text = input.value.trim();
     if (!text) return window.alert("Enter the event text.");
-    state.events.push({ type: "Note", playerId, minute, text });
+    state.events.push({ ...common, type: "Note", text });
     input.value = "";
   } else {
-    state.events.push({ type: "Card", playerId, minute, cardType: md.eventType.value });
+    state.events.push({ ...common, type: "Card", cardType: md.eventType.value });
   }
   saveState();
   renderLive();
@@ -499,12 +519,12 @@ function rebuildSubState(proposed) {
   state.starterIds.forEach(id => open(id, 0));
   const ordered = proposed.map(s => ({ ...s })).sort((a, b) => Number(a.second || 0) - Number(b.second || 0));
   for (const sub of ordered) {
-    const second = Math.max(0, Number(sub.second ?? Number(sub.minute || 0) * 60));
+    const second = Math.max(0, Number(sub.second ?? officialMinuteToPlayedSecond(Number(sub.minute || 0))));
     if (!lineup.includes(sub.off) || lineup.includes(sub.on) || !close(sub.off, second)) return null;
     open(sub.on, second);
     lineup.splice(lineup.indexOf(sub.off), 1, sub.on);
     sub.second = Math.round(second);
-    sub.minute = Math.floor(second / 60);
+    sub.minute = Number.isFinite(Number(sub.minute)) ? Math.floor(Number(sub.minute)) : Math.floor(second / 60);
   }
   return { intervals, lineup, ordered };
 }
@@ -527,7 +547,11 @@ function editSub(index) {
   const off = askPlayer(sub.off, "Player off"); if (off == null || off === undefined) return;
   const on = askPlayer(sub.on, "Player on"); if (on == null || on === undefined) return;
   if (off === on) return window.alert("Players must be different.");
-  applySubChanges(state.substitutions.map((s, i) => i === index ? { ...s, minute, second: minute * 60, off, on } : { ...s }));
+  const period = Number(sub.period || (minute < 45 ? 1 : state.period || 1));
+  const second = period === 2 && Number.isFinite(Number(state.secondHalfStartElapsed))
+    ? Number(state.secondHalfStartElapsed) + Math.max(0, minute * 60 - 45 * 60)
+    : minute * 60;
+  applySubChanges(state.substitutions.map((s, i) => i === index ? { ...s, minute, second, off, on, period } : { ...s }));
 }
 function deleteSub(index) {
   if (!window.confirm("Delete this substitution?")) return;
@@ -538,24 +562,27 @@ function editEvent(index) {
   const event = state.events[index];
   if (!event) return;
   const minute = askMinute(event.minute); if (minute == null || minute === undefined) return;
-  const playerId = askPlayer(event.playerId, "Player"); if (playerId == null || playerId === undefined) return;
+  const playerId = event.type === "Opponent Goal" ? null : askPlayer(event.playerId, "Player");
+  if (event.type !== "Opponent Goal" && (playerId == null || playerId === undefined)) return;
   event.minute = minute;
-  event.playerId = playerId;
-  if (event.type === "Goal") {
+  if (playerId) event.playerId = playerId;
+  if (event.type === "Goal" || event.type === "Opponent Goal") {
     const type = window.prompt("Goal type: Open Play or Penalty", event.goalType || "Open Play");
     if (type === null) return;
     if (!['open play', 'penalty'].includes(type.trim().toLowerCase())) return window.alert("Use Open Play or Penalty.");
     event.goalType = type.trim().toLowerCase() === "penalty" ? "Penalty" : "Open Play";
-    if (event.goalType === "Penalty") delete event.assistPlayerId;
-    else {
-      const names = state.squadIds.map(id => playerName(id)).join(", ");
-      const assist = window.prompt(`Assist (blank for none)\n\nSquad: ${names}`, event.assistPlayerId ? playerName(event.assistPlayerId) : "");
-      if (assist === null) return;
-      if (!assist.trim()) delete event.assistPlayerId;
+    if (event.type === "Goal") {
+      if (event.goalType === "Penalty") delete event.assistPlayerId;
       else {
-        const aid = state.squadIds.find(id => playerName(id).toLowerCase() === assist.trim().toLowerCase());
-        if (!aid || aid === event.playerId) return window.alert("Assist player not recognised.");
-        event.assistPlayerId = aid;
+        const names = state.squadIds.map(id => playerName(id)).join(", ");
+        const assist = window.prompt(`Assist (blank for none)\n\nSquad: ${names}`, event.assistPlayerId ? playerName(event.assistPlayerId) : "");
+        if (assist === null) return;
+        if (!assist.trim()) delete event.assistPlayerId;
+        else {
+          const aid = state.squadIds.find(id => playerName(id).toLowerCase() === assist.trim().toLowerCase());
+          if (!aid || aid === event.playerId) return window.alert("Assist player not recognised.");
+          event.assistPlayerId = aid;
+        }
       }
     }
   } else if (event.type === "Card") {
@@ -597,12 +624,14 @@ function renderRecordedItems() {
 
   md.goalList.innerHTML = "";
   md.playerEventList.innerHTML = "";
-  state.events.map((event, index) => ({ event, index })).sort((a, b) => a.event.minute - b.event.minute).forEach(({ event, index }) => {
+  state.events.map((event, index) => ({ event, index })).sort((a, b) => Number(a.event.second ?? a.event.minute * 60) - Number(b.event.second ?? b.event.minute * 60)).forEach(({ event, index }) => {
     const row = document.createElement("div");
     row.className = "matchday-event-row";
     let text;
     if (event.type === "Goal") {
       text = `${event.minute}' · ${playerName(event.playerId)} · ${event.goalType}${event.assistPlayerId ? ` · Assist: ${playerName(event.assistPlayerId)}` : ""}`;
+    } else if (event.type === "Opponent Goal") {
+      text = `${event.minute}' · Opponent Goal · ${event.goalType || "Open Play"}`;
     } else if (event.type === "Card") {
       const label = event.cardType === "Yellow" ? "Yellow Card" : event.cardType === "Red" ? "Red Card" : event.cardType;
       text = `${event.minute}' · ${playerName(event.playerId)} · ${label}`;
@@ -618,7 +647,7 @@ function renderRecordedItems() {
 function renderLive() {
   const f = fixture();
   md.liveFixture.textContent = f ? labelFixture(f) : "Match";
-  md.clock.textContent = formatClock(elapsedSeconds());
+  md.clock.textContent = formatMatchClock();
   md.clockState.textContent = state.status === "paused" ? "Paused / Half Time" : "Match Running";
   md.pause.classList.toggle("hidden", state.status !== "running");
   md.resume.classList.toggle("hidden", state.status !== "paused");
@@ -642,6 +671,8 @@ function payload(finalSecond) {
     startedAt: state.startedAt,
     finishedAt: state.finishedAt,
     matchSeconds: Math.round(finalSecond),
+    period: Number(state.period || 1),
+    secondHalfStartElapsed: state.secondHalfStartElapsed,
     squad: state.squadIds.map(id => ({ playerId: id, displayName: playerName(id), position: playerPosition(id) })),
     starters: [...state.starterIds],
     substitutions: state.substitutions.map(s => ({ ...s })),
@@ -790,7 +821,7 @@ function ensureRetryButton() {
 function renderFinished() {
   const f = fixture();
   md.finishedFixture.textContent = f ? labelFixture(f) : "Match";
-  md.finishedClock.textContent = formatClock(Number(state.accumulatedSeconds || 0));
+  md.finishedClock.textContent = formatMatchClock();
   md.minutesList.innerHTML = "";
   state.squadIds.forEach(id => {
     const row = document.createElement("div");
@@ -834,7 +865,7 @@ function startTicker() {
   stopTicker();
   timerHandle = setInterval(() => {
     if (state.status === "running") {
-      md.clock.textContent = formatClock(elapsedSeconds());
+      md.clock.textContent = formatMatchClock();
       if (document.activeElement !== md.subMinute) md.subMinute.value = matchMinute();
       if (document.activeElement !== md.goalMinute) md.goalMinute.value = matchMinute();
       if (document.activeElement !== md.eventMinute) md.eventMinute.value = matchMinute();
