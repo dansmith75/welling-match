@@ -1,22 +1,9 @@
-// Small live Matchday presentation fixes: aligned scoreboard actions, spanner edit
-// controls, and safe rendering for events that have no player label.
+// Small live Matchday presentation fixes: spanner edit controls and safe rendering
+// for timeline events that have no player label. Scoreboard geometry is owned solely
+// by matchday-live-controls.js.
 (() => {
   const style = document.createElement("style");
   style.textContent = `
-    .matchday-score-panel{display:flex!important;flex-direction:column!important;min-height:100%!important}
-    .matchday-time-panel .matchday-halftime-button,
-    .matchday-time-panel #matchday-pause,
-    .matchday-result-panel .matchday-opponent-goal{
-      width:min(82%,360px)!important;
-      min-height:74px!important;
-      margin-left:auto!important;
-      margin-right:auto!important;
-      margin-top:auto!important;
-      display:flex!important;
-      align-items:center!important;
-      justify-content:center!important;
-      box-sizing:border-box!important;
-    }
     .md4-edit{
       width:48px!important;
       min-width:48px!important;
@@ -53,16 +40,7 @@
     });
   }
 
-  function alignScoreboardActions() {
-    const timePanel = document.querySelector(".matchday-time-panel");
-    const resultPanel = document.querySelector(".matchday-result-panel");
-    if (!timePanel || !resultPanel) return;
-    if (timePanel.style.alignItems !== "center") timePanel.style.alignItems = "center";
-    if (resultPanel.style.alignItems !== "center") resultPanel.style.alignItems = "center";
-  }
-
   function polish() {
-    alignScoreboardActions();
     polishTimeline();
   }
 
