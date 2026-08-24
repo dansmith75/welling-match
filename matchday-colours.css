@@ -3,3 +3,10 @@
   background: #2563eb !important;
   color: #fff !important;
 }
+
+/* Half-time action: same warm background as Resume, green lettering. */
+#matchday-start-second-half {
+  background: #fff3df !important;
+  border-color: #fdba74 !important;
+  color: #15803d !important;
+}
