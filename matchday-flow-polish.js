@@ -35,19 +35,21 @@
     if (!timeline) return;
 
     timeline.querySelectorAll(".md4-edit").forEach(button => {
-      button.textContent = "🔧";
-      button.title = "Edit timeline item";
-      button.setAttribute("aria-label", "Edit timeline item");
+      if (button.textContent !== "🔧") button.textContent = "🔧";
+      if (button.title !== "Edit timeline item") button.title = "Edit timeline item";
+      if (button.getAttribute("aria-label") !== "Edit timeline item") {
+        button.setAttribute("aria-label", "Edit timeline item");
+      }
     });
 
     timeline.querySelectorAll(".md4-timeline-text").forEach(label => {
-      // Older/test events can exist without playerId. Never show the literal
-      // JavaScript fallback word "undefined" to the user.
-      const cleaned = String(label.textContent || "")
+      const original = String(label.textContent || "");
+      if (!/\bundefined\b/i.test(original)) return;
+      const cleaned = original
         .replace(/\bundefined\b\s*[·-]?\s*/gi, "")
         .replace(/\s+·\s*$/g, "")
         .trim();
-      if (cleaned !== label.textContent) label.textContent = cleaned || "📝 Event";
+      label.textContent = cleaned || "📝 Event";
     });
   }
 
@@ -55,8 +57,8 @@
     const timePanel = document.querySelector(".matchday-time-panel");
     const resultPanel = document.querySelector(".matchday-result-panel");
     if (!timePanel || !resultPanel) return;
-    timePanel.style.alignItems = "center";
-    resultPanel.style.alignItems = "center";
+    if (timePanel.style.alignItems !== "center") timePanel.style.alignItems = "center";
+    if (resultPanel.style.alignItems !== "center") resultPanel.style.alignItems = "center";
   }
 
   function polish() {
@@ -68,6 +70,16 @@
   setTimeout(polish, 0);
   setTimeout(polish, 200);
 
-  const observer = new MutationObserver(polish);
-  observer.observe(document.body, { childList:true, subtree:true, characterData:true });
+  // Matchday re-renders sections as events are added. Observe structural changes only,
+  // and debounce the cosmetic pass so our own text tweaks cannot trigger an endless loop.
+  let scheduled = false;
+  const observer = new MutationObserver(() => {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      polish();
+    });
+  });
+  observer.observe(document.body, { childList:true, subtree:true });
 })();
