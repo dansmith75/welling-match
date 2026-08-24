@@ -97,8 +97,35 @@ button { cursor: pointer; }
 .matchday-section-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 16px 0 8px; font-size: .82rem; color: var(--muted); }
 .matchday-section-title div { display: flex; gap: 8px; }
 .matchday-player-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
-.matchday-player-choice { display: flex; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 11px; padding: 10px; font-weight: 900; }
-.matchday-player-choice.selected { border-color: var(--primary); background: rgba(200,16,46,.07); }
+.matchday-player-choice,
+.matchday-player-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  width: 100%;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  color: var(--text);
+  font-weight: 900;
+  text-align: center;
+  box-shadow: 0 2px 7px rgba(17,24,39,.04);
+  transition: background .15s ease, border-color .15s ease, color .15s ease, transform .15s ease;
+}
+.matchday-player-choice:hover,
+.matchday-player-button:hover { background: #f8fafc; }
+.matchday-player-choice.selected,
+.matchday-player-button.selected {
+  border-color: var(--primary);
+  background: rgba(200,16,46,.08);
+  color: var(--primary);
+  box-shadow: 0 0 0 1px rgba(200,16,46,.08);
+}
+.matchday-player-choice:active,
+.matchday-player-button:active { transform: translateY(1px); }
 .matchday-wide { width: 100%; margin-top: 12px; }
 .matchday-scoreboard { margin-bottom: 12px; border-radius: 14px; padding: 16px; background: var(--primary); color: white; text-align: center; }
 .matchday-live-fixture { font-weight: 900; }
