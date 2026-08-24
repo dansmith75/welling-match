@@ -1,29 +1,15 @@
-// Live Matchday refinements: move Opponent Goal into the primary goal controls,
-// add a Formation shortcut under the score, and render specific timeline labels.
+// Live Matchday refinements: keep Goal/Subs side-by-side, put Opponent Goal inside
+// the Goal full-page picker, provide a light-green Formation shortcut under the score,
+// and render specific timeline labels.
 (() => {
   if (typeof state === "undefined") return;
 
   const style = document.createElement("style");
   style.textContent = `
-    .md4-primary-actions{
-      grid-template-columns:1fr 1fr!important;
-    }
-    .md4-primary-actions .matchday-opponent-goal{
-      position:static!important;
-      width:100%!important;
-      min-height:76px!important;
-      margin:0!important;
-      border-radius:16px!important;
-      font-size:1.05rem!important;
-      font-weight:950!important;
-      background:rgba(255,255,255,.14)!important;
-      border:1px solid rgba(255,255,255,.55)!important;
-      color:#fff!important;
-      box-shadow:0 6px 16px rgba(17,24,39,.10)!important;
-    }
-    .md4-primary-actions #md4-subs{
-      grid-column:1 / -1;
-    }
+    .md4-primary-actions{grid-template-columns:1fr 1fr!important}
+    .md4-primary-actions #md4-goal,
+    .md4-primary-actions #md4-subs{grid-column:auto!important}
+
     .matchday-formation-live{
       width:min(82%,360px)!important;
       min-height:74px!important;
@@ -31,15 +17,34 @@
       display:flex!important;
       align-items:center!important;
       justify-content:center!important;
-      border:1px solid rgba(255,255,255,.55)!important;
+      border:1px solid rgba(22,163,74,.35)!important;
       border-radius:14px!important;
-      background:rgba(255,255,255,.14)!important;
-      color:#fff!important;
+      background:rgba(220,252,231,.82)!important;
+      color:#15803d!important;
       font-weight:950!important;
       font-size:1rem!important;
+      box-shadow:0 4px 12px rgba(22,163,74,.08)!important;
     }
+
+    .md4-opponent-goal-inline{
+      width:100%!important;
+      min-height:62px!important;
+      margin:0 0 14px!important;
+      border-radius:14px!important;
+      border:1px solid rgba(220,38,38,.28)!important;
+      background:rgba(254,226,226,.92)!important;
+      color:#b91c1c!important;
+      font-size:1.02rem!important;
+      font-weight:950!important;
+      display:flex!important;
+      align-items:center!important;
+      justify-content:center!important;
+      box-shadow:none!important;
+    }
+
     @media(max-width:520px){
-      .md4-primary-actions .matchday-opponent-goal{min-height:72px!important;font-size:.98rem!important}
+      .matchday-formation-live{min-height:68px!important;width:86%!important}
+      .md4-opponent-goal-inline{min-height:58px!important}
     }
   `;
   document.head.appendChild(style);
@@ -60,8 +65,7 @@
       return `⚽ ${scorer || "Goal"}${scorer ? " goal" : ""}${assist ? ` · assist ${assist}` : ""}`;
     }
     if (event.type === "Opponent Goal") {
-      const detail = event.goalType || "Open Play";
-      return `🔴 Opponent Goal · ${detail}`;
+      return `🔴 Opponent Goal · ${event.goalType || "Open Play"}`;
     }
     if (event.type === "Card") {
       const name = safeName(event.playerId);
@@ -73,22 +77,16 @@
       return `🥅 Penalty awarded${name ? ` to ${name}` : ""}`;
     }
     const name = safeName(event.playerId);
-    const text = String(event.text || "Event").trim();
-    return `📝 ${name ? `${name} · ` : ""}${text}`;
+    return `📝 ${name ? `${name} · ` : ""}${String(event.text || "Event").trim()}`;
   }
 
   function timelineItems() {
     const subs = (state.substitutions || []).map((sub, index) => ({
-      kind: "sub",
-      index,
-      minute: Number(sub.minute || 0),
-      text: `🔄 ${safeName(sub.off) || "Player"} off → ${safeName(sub.on) || "Player"} on`
+      kind:"sub", index, minute:Number(sub.minute || 0),
+      text:`🔄 ${safeName(sub.off) || "Player"} off → ${safeName(sub.on) || "Player"} on`
     }));
     const events = (state.events || []).map((event, index) => ({
-      kind: "event",
-      index,
-      minute: Number(event.minute || 0),
-      text: eventText(event)
+      kind:"event", index, minute:Number(event.minute || 0), text:eventText(event)
     }));
     return [...subs, ...events].sort((a,b) => a.minute - b.minute || a.kind.localeCompare(b.kind));
   }
@@ -97,8 +95,7 @@
     const box = document.getElementById("md4-timeline");
     if (!box) return;
     const items = timelineItems();
-    const rows = [...box.querySelectorAll(".md4-timeline-row")];
-    rows.forEach((row, index) => {
+    [...box.querySelectorAll(".md4-timeline-row")].forEach((row, index) => {
       const item = items[index];
       if (!item) return;
       const label = row.querySelector(".md4-timeline-text");
@@ -112,32 +109,53 @@
     });
   }
 
-  function arrangeLiveControls() {
-    const primary = document.querySelector(".md4-primary-actions");
-    const opponent = document.querySelector(".matchday-opponent-goal");
-    if (primary && opponent && opponent.parentElement !== primary) {
-      const subs = document.getElementById("md4-subs");
-      primary.insertBefore(opponent, subs || null);
-      opponent.textContent = "Opponent Goal +";
-    }
-
+  function ensureFormationShortcut() {
     const resultPanel = document.querySelector(".matchday-result-panel");
-    if (resultPanel && !document.getElementById("matchday-formation-live")) {
-      const button = document.createElement("button");
+    if (!resultPanel) return;
+    let button = document.getElementById("matchday-formation-live");
+    if (!button) {
+      button = document.createElement("button");
       button.id = "matchday-formation-live";
       button.type = "button";
       button.className = "matchday-formation-live";
       button.textContent = "Formation";
-      button.addEventListener("click", () => {
-        const launch = document.getElementById("open-formation");
-        if (launch) launch.click();
-      });
+      button.addEventListener("click", () => document.getElementById("open-formation")?.click());
       resultPanel.appendChild(button);
     }
   }
 
+  function putOpponentGoalInsideGoalFlow() {
+    const opponent = document.querySelector(".matchday-opponent-goal");
+    const goalButton = document.getElementById("md4-goal");
+    if (!opponent || !goalButton) return;
+
+    // Keep the main Goal/Subs buttons as the only two actions on the live screen.
+    opponent.classList.add("md4-opponent-goal-inline");
+
+    if (goalButton.dataset.opponentInsideReady !== "true") {
+      goalButton.dataset.opponentInsideReady = "true";
+      goalButton.addEventListener("click", () => {
+        setTimeout(() => {
+          const body = document.querySelector("#md4-goal-view .md4-body");
+          const grid = body?.querySelector(".md4-grid");
+          if (!body || !grid) return;
+          opponent.textContent = "Opponent Goal +";
+          opponent.classList.add("md4-opponent-goal-inline");
+          body.insertBefore(opponent, grid);
+        }, 0);
+      });
+    }
+
+    // If it is still sitting in the scoreboard from an earlier render, hide it there
+    // until Goal is opened; the actual button is moved into the Goal picker on demand.
+    const resultPanel = document.querySelector(".matchday-result-panel");
+    if (opponent.parentElement === resultPanel) opponent.style.display = "none";
+    else opponent.style.display = "";
+  }
+
   function refresh() {
-    arrangeLiveControls();
+    ensureFormationShortcut();
+    putOpponentGoalInsideGoalFlow();
     refreshTimelineLabels();
   }
 
@@ -151,5 +169,5 @@
 
   refresh();
   setTimeout(refresh, 0);
-  setTimeout(refresh, 200);
+  setTimeout(refresh, 150);
 })();
