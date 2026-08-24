@@ -2,48 +2,61 @@
 // GitHub Pages HTML/data is requested without users needing Ctrl+F5.
 (() => {
   const header = document.querySelector('.app-header');
-  if (!header || document.getElementById('hard-refresh-button')) return;
-
   const changeUser = document.getElementById('change-user');
-  let host = document.getElementById('header-actions');
+  if (!header || !changeUser) return;
 
+  let host = document.getElementById('header-actions');
   if (!host) {
     host = document.createElement('div');
     host.id = 'header-actions';
     host.className = 'header-actions';
-    header.appendChild(host);
   }
 
-  // ui-polish moves the user button into the header. Keep both controls together
-  // in one visible header cell so the refresh icon cannot disappear into the
-  // deliberately hidden current-user-line or overlap the user button.
-  if (changeUser && changeUser.parentElement !== host) host.appendChild(changeUser);
-
-  const button = document.createElement('button');
-  button.id = 'hard-refresh-button';
-  button.type = 'button';
-  button.className = 'hard-refresh-button';
-  button.title = 'Refresh latest version';
-  button.setAttribute('aria-label', 'Refresh latest version');
-  button.innerHTML = '<span aria-hidden="true">↻</span>';
+  let button = document.getElementById('hard-refresh-button');
+  if (!button) {
+    button = document.createElement('button');
+    button.id = 'hard-refresh-button';
+    button.type = 'button';
+    button.className = 'hard-refresh-button';
+    button.title = 'Refresh latest version';
+    button.setAttribute('aria-label', 'Refresh latest version');
+    button.innerHTML = '<span aria-hidden="true">↻</span>';
+  }
 
   const style = document.createElement('style');
+  style.id = 'hard-refresh-style';
   style.textContent = `
-    .header-actions {
-      justify-self:end;
-      align-self:center;
-      display:flex;
-      align-items:center;
-      justify-content:flex-end;
-      gap:8px;
-      min-width:0;
+    .app-header {
+      grid-template-columns:auto minmax(0,1fr) auto !important;
     }
+    .header-actions {
+      grid-column:3 !important;
+      grid-row:1 !important;
+      justify-self:end !important;
+      align-self:center !important;
+      display:flex !important;
+      align-items:center !important;
+      justify-content:flex-end !important;
+      flex-wrap:nowrap !important;
+      gap:8px !important;
+      min-width:0;
+      margin:0 !important;
+    }
+    .header-actions #change-user,
     .header-actions .header-user-button {
+      position:static !important;
+      grid-column:auto !important;
+      grid-row:auto !important;
+      justify-self:auto !important;
+      align-self:center !important;
+      flex:0 0 auto !important;
       margin:0 !important;
     }
     .hard-refresh-button {
       position:static !important;
-      flex:0 0 auto;
+      grid-column:auto !important;
+      grid-row:auto !important;
+      flex:0 0 auto !important;
       width:38px;
       height:38px;
       border:1px solid rgba(255,255,255,.72);
@@ -53,7 +66,7 @@
       display:grid;
       place-items:center;
       padding:0;
-      margin:0;
+      margin:0 !important;
       cursor:pointer;
       font:900 23px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
       box-shadow:0 2px 8px rgba(0,0,0,.12);
@@ -64,32 +77,67 @@
     .hard-refresh-button.refreshing span { animation:welling-refresh-spin .7s linear infinite; }
     @keyframes welling-refresh-spin { to { transform:rotate(360deg); } }
     @media(max-width:520px){
-      .header-actions { gap:6px; }
+      .header-actions { gap:6px !important; }
       .hard-refresh-button { width:34px; height:34px; font-size:21px; }
     }
-    @media(prefers-reduced-motion:reduce){ .hard-refresh-button.refreshing span { animation:none; } }
+    @media(prefers-reduced-motion:reduce){
+      .hard-refresh-button.refreshing span { animation:none; }
+    }
   `;
+  document.head.querySelector('#hard-refresh-style')?.remove();
   document.head.appendChild(style);
 
-  // Refresh icon first, user button second.
-  host.insertBefore(button, changeUser && changeUser.parentElement === host ? changeUser : null);
-
-  button.addEventListener('click', async () => {
-    if (button.disabled) return;
-    button.disabled = true;
-    button.classList.add('refreshing');
-
+  let arranging = false;
+  function ensureTogether() {
+    if (arranging) return;
+    arranging = true;
     try {
-      if ('caches' in window) {
-        const names = await caches.keys();
-        await Promise.all(names.map(name => caches.delete(name)));
-      }
-    } catch (_) {
-      // Cache Storage is an enhancement only; continue with the cache-busting reload.
-    }
+      if (host.parentElement !== header) header.appendChild(host);
 
-    const url = new URL(window.location.href);
-    url.searchParams.set('_refresh', Date.now().toString());
-    window.location.replace(url.toString());
+      // The user control and refresh icon are deliberately one header grid item.
+      // Reassert this if a later polish layer moves the user button back out.
+      if (changeUser.parentElement !== host) host.appendChild(changeUser);
+      if (button.parentElement !== host) host.appendChild(button);
+
+      // Required order: User | Refresh.
+      if (host.firstElementChild !== changeUser) host.insertBefore(changeUser, host.firstElementChild);
+      if (changeUser.nextElementSibling !== button) host.insertBefore(button, changeUser.nextElementSibling);
+    } finally {
+      arranging = false;
+    }
+  }
+
+  ensureTogether();
+
+  const observer = new MutationObserver(() => {
+    if (!arranging) ensureTogether();
   });
+  observer.observe(header, { childList:true, subtree:true });
+
+  window.addEventListener('load', ensureTogether, { once:true });
+  setTimeout(ensureTogether, 0);
+  setTimeout(ensureTogether, 150);
+  setTimeout(ensureTogether, 500);
+
+  if (button.dataset.refreshReady !== 'true') {
+    button.dataset.refreshReady = 'true';
+    button.addEventListener('click', async () => {
+      if (button.disabled) return;
+      button.disabled = true;
+      button.classList.add('refreshing');
+
+      try {
+        if ('caches' in window) {
+          const names = await caches.keys();
+          await Promise.all(names.map(name => caches.delete(name)));
+        }
+      } catch (_) {
+        // Cache Storage is an enhancement only; continue with cache-busting reload.
+      }
+
+      const url = new URL(window.location.href);
+      url.searchParams.set('_refresh', Date.now().toString());
+      window.location.replace(url.toString());
+    });
+  }
 })();
