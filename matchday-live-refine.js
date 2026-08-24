@@ -1,6 +1,7 @@
 // Live Matchday refinements: keep Goal/Subs side-by-side, put Opponent Goal inside
-// the Goal full-page picker, provide a light-green Formation shortcut under the score,
-// and render specific timeline labels.
+// the Goal full-page picker, provide the Formation shortcut under the score,
+// and render specific timeline labels. Scoreboard geometry is owned solely by
+// matchday-live-controls.js.
 (() => {
   if (typeof state === "undefined") return;
 
@@ -10,10 +11,8 @@
     .md4-primary-actions #md4-goal,
     .md4-primary-actions #md4-subs{grid-column:auto!important}
 
+    /* Appearance only. Width/height/margins are controlled centrally. */
     .matchday-formation-live{
-      width:min(82%,360px)!important;
-      min-height:74px!important;
-      margin:auto auto 0!important;
       display:flex!important;
       align-items:center!important;
       justify-content:center!important;
@@ -42,7 +41,6 @@
     }
 
     @media(max-width:520px){
-      .matchday-formation-live{min-height:68px!important;width:86%!important}
       .md4-opponent-goal-inline{min-height:58px!important}
     }
   `;
