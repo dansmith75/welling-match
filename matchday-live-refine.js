@@ -36,7 +36,6 @@
       color:#b91c1c!important;
       font-size:1.02rem!important;
       font-weight:950!important;
-      display:flex!important;
       align-items:center!important;
       justify-content:center!important;
       box-shadow:none!important;
@@ -124,13 +123,27 @@
     }
   }
 
+  function hideOpponentGoalOnLiveScreen(opponent) {
+    if (!opponent) return;
+    opponent.style.setProperty("display", "none", "important");
+  }
+
+  function showOpponentGoalInGoalPicker(opponent) {
+    if (!opponent) return;
+    opponent.style.setProperty("display", "flex", "important");
+  }
+
   function putOpponentGoalInsideGoalFlow() {
     const opponent = document.querySelector(".matchday-opponent-goal");
     const goalButton = document.getElementById("md4-goal");
     if (!opponent || !goalButton) return;
 
-    // Keep the main Goal/Subs buttons as the only two actions on the live screen.
+    opponent.textContent = "Opponent Goal +";
     opponent.classList.add("md4-opponent-goal-inline");
+
+    // It must never appear on the live scoreboard/action screen.
+    const goalView = document.getElementById("md4-goal-view");
+    if (!goalView || opponent.closest("#md4-goal-view") === null) hideOpponentGoalOnLiveScreen(opponent);
 
     if (goalButton.dataset.opponentInsideReady !== "true") {
       goalButton.dataset.opponentInsideReady = "true";
@@ -139,18 +152,22 @@
           const body = document.querySelector("#md4-goal-view .md4-body");
           const grid = body?.querySelector(".md4-grid");
           if (!body || !grid) return;
-          opponent.textContent = "Opponent Goal +";
-          opponent.classList.add("md4-opponent-goal-inline");
           body.insertBefore(opponent, grid);
+          showOpponentGoalInGoalPicker(opponent);
         }, 0);
       });
     }
 
-    // If it is still sitting in the scoreboard from an earlier render, hide it there
-    // until Goal is opened; the actual button is moved into the Goal picker on demand.
-    const resultPanel = document.querySelector(".matchday-result-panel");
-    if (opponent.parentElement === resultPanel) opponent.style.display = "none";
-    else opponent.style.display = "";
+    // When the Goal overlay is closed, immediately hide the button again so an
+    // older scoreboard rule cannot make it visible back on the live screen.
+    if (goalView && goalView.dataset.opponentCloseGuard !== "true") {
+      goalView.dataset.opponentCloseGuard = "true";
+      goalView.addEventListener("click", event => {
+        if (event.target === goalView || event.target.closest(".md4-close")) {
+          setTimeout(() => hideOpponentGoalOnLiveScreen(opponent), 0);
+        }
+      });
+    }
   }
 
   function refresh() {
