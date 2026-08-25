@@ -61,10 +61,8 @@
   function nodePlayerId(node) {
     if (!node) return "";
     if (node.dataset?.playerId) return node.dataset.playerId;
-    // Formation picker keeps the full player name in <strong>; the position sits in a sibling span.
     const strongName = node.querySelector?.(":scope > strong")?.textContent;
     if (strongName) return idForName(strongName);
-    // Formation pitch may display a shortened name, so prefer a previously attached id.
     const explicitName = node.querySelector?.(".formation-player-name")?.dataset?.fullName;
     if (explicitName) return idForName(explicitName);
     return playerIdFromText(node.textContent || "");
@@ -99,18 +97,15 @@
   }
 
   function refreshEligibilityUi() {
-    // Every football-action selector except Event must exclude dismissed players.
     ["matchday-sub-off","matchday-sub-on","matchday-goal-player","matchday-goal-assist"].forEach(id => removeDismissedOptions(document.getElementById(id)));
     document.querySelectorAll("#md4-sub-view select.md4-off,#md4-sub-view select.md-bulk-off,#md4-sub-view select.md4-on,#md4-sub-view select.md-bulk-on,#matchday-bulk-subs select.md-bulk-off,#matchday-bulk-subs select.md-bulk-on").forEach(removeDismissedOptions);
 
-    // Remove dismissed players from scorer, assist, penalty and substitution button grids.
     document.querySelectorAll("#md4-goal-view .md4-player,#md4-sub-view .md4-player,#matchday-quick-goal .md-player-grid button,#md-penalty-players button").forEach(button => {
       const id = nodePlayerId(button);
       if (id) button.dataset.playerId = id;
       if (id && isDismissed(id)) button.remove();
     });
 
-    // Formation subs retain the player so the dismissal is visible, but cannot be selected.
     document.querySelectorAll(".formation-sub-chip").forEach(chip => {
       const id = nodePlayerId(chip);
       if (id) chip.dataset.playerId=id;
@@ -133,7 +128,36 @@
     });
   }
 
-  function refreshReleaseUi() { refreshCardDots(); refreshEligibilityUi(); }
+  function tightenScoreboard() {
+    const mobile = window.matchMedia("(max-width:520px)").matches;
+    const mainHeight = mobile ? 108 : 116;
+    const labelHeight = mobile ? 22 : 24;
+    const actionHeight = mobile ? 54 : 58;
+
+    document.querySelectorAll(".matchday-time-panel,.matchday-result-panel").forEach(panel => {
+      panel.style.setProperty("grid-template-rows",`${labelHeight}px ${mainHeight}px ${actionHeight}px`,"important");
+    });
+
+    [document.getElementById("matchday-time-main"),document.getElementById("matchday-result-main")].forEach(main => {
+      if (!main) return;
+      main.style.setProperty("height",`${mainHeight}px`,"important");
+      main.style.setProperty("min-height",`${mainHeight}px`,"important");
+      main.style.setProperty("max-height",`${mainHeight}px`,"important");
+      main.style.setProperty("justify-content","flex-start","important");
+      main.style.setProperty("padding-top","4px","important");
+    });
+
+    document.getElementById("matchday-clock")?.style.setProperty("margin","0","important");
+    document.getElementById("matchday-clock-state")?.style.setProperty("margin","4px 0 0","important");
+    document.getElementById("matchday-team-score")?.style.setProperty("margin","0","important");
+  }
+
+  function refreshReleaseUi() {
+    refreshCardDots();
+    refreshEligibilityUi();
+    tightenScoreboard();
+    requestAnimationFrame(tightenScoreboard);
+  }
 
   document.addEventListener("click", event => {
     const assist = event.target.closest("#md4-assists .md4-player");
@@ -148,14 +172,12 @@
       return;
     }
 
-    // These actions rebuild eligible-player lists synchronously. Re-filter immediately after them.
     if (event.target.closest("#md4-subs,#md4-sub-view button,#matchday-bulk-subs-button,#matchday-bulk-subs button,#open-formation,.matchday-formation-live,.formation-slot,#formation-select,#md4-goal,#matchday-quick-goal-button,#md4-penalty-event")) {
       setTimeout(refreshReleaseUi,0);
       setTimeout(refreshReleaseUi,50);
     }
   });
 
-  // Event is deliberately not included: a dismissed player must remain selectable there to record what happened.
   document.addEventListener("click", event => {
     const target = event.target.closest("#formation-picker-list .formation-player-option,#md4-goal-view .md4-player,#md4-sub-view .md4-player,#matchday-quick-goal .md-player-grid button,#md-penalty-players button");
     if (!target) return;
@@ -170,6 +192,7 @@
     renderLive = function(){ previousRenderLive(); refreshReleaseUi(); };
   }
 
+  window.addEventListener("resize",() => requestAnimationFrame(tightenScoreboard));
   window.addEventListener("load",refreshReleaseUi,{once:true});
   refreshReleaseUi();
   setTimeout(refreshReleaseUi,100);
