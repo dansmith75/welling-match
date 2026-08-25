@@ -1,6 +1,7 @@
 // Matchday release 2026-08-25
 // - Yellow/red card dots beside player names
-// - Red-carded players cannot be selected to come back on as substitutes
+// - Red card OR second yellow = dismissed
+// - Dismissed players cannot be subbed off, brought back on, or selected into Formation
 // - Assist selection saves the goal immediately
 // - Opponent goal type selection returns straight to Matchday
 // - Tightens the Match Time / Score spacing without changing control alignment
@@ -26,25 +27,41 @@
     .matchday-lineup-chip .md-card-dot,
     .formation-sub-chip .md-card-dot{margin-left:6px}
     .formation-slot .md-card-dot{position:absolute;right:5px;bottom:5px;margin:0}
+    .formation-sub-chip.dismissed,
+    .formation-player-option.dismissed{
+      opacity:.48;
+      cursor:not-allowed!important;
+      filter:saturate(.7);
+    }
+    .formation-sub-chip.dismissed{
+      text-decoration:line-through;
+      text-decoration-thickness:2px;
+    }
   `;
   document.head.appendChild(style);
 
-  function cardStatus(id) {
+  function disciplinaryStatus(id) {
     if (!id) return "";
-    let yellow = false;
+    let yellows = 0;
     for (const event of state.events || []) {
       if (event?.type !== "Card" || event.playerId !== id) continue;
-      if (String(event.cardType || "").toLowerCase() === "red") return "red";
-      if (String(event.cardType || "").toLowerCase() === "yellow") yellow = true;
+      const type = String(event.cardType || "").toLowerCase();
+      if (type === "red") return "red";
+      if (type === "yellow") yellows += 1;
     }
-    return yellow ? "yellow" : "";
+    if (yellows >= 2) return "red";
+    if (yellows === 1) return "yellow";
+    return "";
   }
 
-  function redCardIds() {
-    return new Set((state.events || [])
-      .filter(event => event?.type === "Card" && String(event.cardType || "").toLowerCase() === "red")
-      .map(event => event.playerId)
-      .filter(Boolean));
+  function dismissedIds() {
+    const ids = new Set();
+    for (const event of state.events || []) {
+      const id = event?.playerId;
+      if (!id || event?.type !== "Card") continue;
+      if (disciplinaryStatus(id) === "red") ids.add(id);
+    }
+    return ids;
   }
 
   function allPlayerIds() {
@@ -70,12 +87,13 @@
   function ensureDot(node, id) {
     if (!node || !id) return;
     node.querySelector?.(".md-card-dot")?.remove();
-    const status = cardStatus(id);
+    const status = disciplinaryStatus(id);
     if (!status) return;
     const dot = document.createElement("span");
     dot.className = `md-card-dot ${status}`;
-    dot.setAttribute("aria-label", status === "red" ? "Red card" : "Yellow card");
-    dot.title = status === "red" ? "Red card" : "Yellow card";
+    const label = status === "red" ? "Dismissed" : "Yellow card";
+    dot.setAttribute("aria-label", label);
+    dot.title = label;
     node.appendChild(dot);
   }
 
@@ -100,36 +118,62 @@
     });
   }
 
-  function removeRedOptions(select) {
+  function removeDismissedOptions(select) {
     if (!select) return;
-    const reds = redCardIds();
+    const dismissed = dismissedIds();
     [...select.options].forEach(option => {
-      if (option.value && reds.has(option.value)) option.remove();
+      if (option.value && dismissed.has(option.value)) option.remove();
     });
   }
 
   function refreshSubAvailability() {
-    const reds = redCardIds();
+    const dismissed = dismissedIds();
 
-    // Legacy/native substitute-on control.
-    removeRedOptions(document.getElementById("matchday-sub-on"));
+    // Legacy/native controls: a sent-off player is no longer part of a substitution.
+    removeDismissedOptions(document.getElementById("matchday-sub-off"));
+    removeDismissedOptions(document.getElementById("matchday-sub-on"));
 
     const subView = document.getElementById("md4-sub-view");
     if (!subView) return;
 
-    // Bulk substitutions: red-carded players must never be available in ON selects.
-    subView.querySelectorAll("select.md4-on, select.md-bulk-on").forEach(removeRedOptions);
+    // Bulk substitutions: remove dismissed players from both sides of the swap.
+    subView.querySelectorAll("select.md4-off, select.md-bulk-off, select.md4-on, select.md-bulk-on").forEach(removeDismissedOptions);
 
-    // Individual substitution flow: only remove players on the 'coming on' screen.
     const body = subView.querySelector(".md4-body");
     const choosingOn = /choose player coming on/i.test(body?.textContent || "");
-    if (choosingOn) {
+    const choosingOff = /individual substitution|tap the player coming off/i.test(body?.textContent || "");
+    if (choosingOn || choosingOff) {
       body.querySelectorAll(".md4-player").forEach(button => {
         const id = button.dataset.playerId || playerIdFromText(button.textContent);
         if (id) button.dataset.playerId = id;
-        if (reds.has(id)) button.remove();
+        if (dismissed.has(id)) button.remove();
       });
     }
+  }
+
+  function refreshFormationEligibility() {
+    const dismissed = dismissedIds();
+
+    document.querySelectorAll(".formation-sub-chip").forEach(chip => {
+      const id = playerIdFromText(chip.textContent);
+      ensureDot(chip, id);
+      const sentOff = dismissed.has(id);
+      chip.classList.toggle("dismissed", sentOff);
+      chip.setAttribute("aria-disabled", sentOff ? "true" : "false");
+      chip.title = sentOff ? "Dismissed — cannot be selected" : "";
+    });
+
+    document.querySelectorAll("#formation-picker-list .formation-player-option").forEach(button => {
+      const id = playerIdFromText(button.textContent);
+      const sentOff = dismissed.has(id);
+      button.classList.toggle("dismissed", sentOff);
+      button.disabled = sentOff;
+      button.setAttribute("aria-disabled", sentOff ? "true" : "false");
+      if (sentOff) {
+        ensureDot(button, id);
+        button.title = "Dismissed — cannot be selected";
+      }
+    });
   }
 
   function tightenScoreboard() {
@@ -153,6 +197,7 @@
   function refreshReleaseUi() {
     refreshCardDots();
     refreshSubAvailability();
+    refreshFormationEligibility();
     tightenScoreboard();
   }
 
@@ -177,14 +222,29 @@
       return;
     }
 
-    // Any route into the substitute flow may rebuild its buttons/selects.
+    // Any route into the substitute or Formation flow may rebuild its controls.
     if (event.target.closest("#md4-subs, #md4-sub-view button, #matchday-add-sub")) {
       setTimeout(refreshReleaseUi, 0);
     }
+    if (event.target.closest("#open-formation, .matchday-formation-live, .formation-slot, #formation-select")) {
+      setTimeout(refreshFormationEligibility, 0);
+      setTimeout(refreshFormationEligibility, 80);
+    }
   });
 
-  // Run after all existing render wrappers so the final DOM gets the indicators
-  // and tighter geometry. No MutationObserver is used here.
+  // Block a dismissed player at capture phase as a final guard, even if a stale
+  // Formation picker was already open before the card event was recorded.
+  document.addEventListener("click", event => {
+    const option = event.target.closest("#formation-picker-list .formation-player-option");
+    if (!option) return;
+    const id = playerIdFromText(option.textContent);
+    if (!dismissedIds().has(id)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+
+  // Run after all existing render wrappers so the final DOM gets indicators,
+  // dismissal rules and tighter geometry. No MutationObserver is used here.
   if (typeof renderLive === "function") {
     const previousRenderLive = renderLive;
     renderLive = function () {
