@@ -32,7 +32,6 @@
   function isDismissed(id) { return disciplinaryStatus(id) === "red"; }
   function eligibleIds(ids) { return (ids || []).filter(id => !isDismissed(id)); }
 
-  // Authoritative helpers used by Formation / Goals / Subs / Penalties before they render.
   window.matchdayDisciplinaryStatus = disciplinaryStatus;
   window.matchdayIsDismissed = isDismissed;
   window.matchdayEligibleIds = eligibleIds;
@@ -45,16 +44,30 @@
     return [...ids].filter(Boolean);
   }
 
-  function playerIdFromText(text) {
-    const name = String(text || "").replace(/\s+/g," ").trim().split(" · ")[0].trim();
+  function idForName(name) {
+    const wanted = String(name || "").replace(/\s+/g," ").trim();
+    if (!wanted) return "";
     return allPlayerIds().find(id => {
-      try { return String(typeof playerName === "function" ? playerName(id) : id).trim() === name; }
-      catch (_) { return String(id) === name; }
+      try { return String(typeof playerName === "function" ? playerName(id) : id).replace(/\s+/g," ").trim() === wanted; }
+      catch (_) { return String(id) === wanted; }
     }) || "";
   }
 
+  function playerIdFromText(text) {
+    const clean = String(text || "").replace(/\s+/g," ").trim();
+    return idForName(clean.split(" · ")[0].trim());
+  }
+
   function nodePlayerId(node) {
-    return node?.dataset?.playerId || playerIdFromText(node?.textContent || "");
+    if (!node) return "";
+    if (node.dataset?.playerId) return node.dataset.playerId;
+    // Formation picker keeps the full player name in <strong>; the position sits in a sibling span.
+    const strongName = node.querySelector?.(":scope > strong")?.textContent;
+    if (strongName) return idForName(strongName);
+    // Formation pitch may display a shortened name, so prefer a previously attached id.
+    const explicitName = node.querySelector?.(".formation-player-name")?.dataset?.fullName;
+    if (explicitName) return idForName(explicitName);
+    return playerIdFromText(node.textContent || "");
   }
 
   function ensureDot(node, id) {
@@ -70,16 +83,13 @@
   }
 
   function refreshCardDots() {
-    document.querySelectorAll(".md4-player,.formation-sub-chip,#formation-picker-list .formation-player-option").forEach(node => {
+    document.querySelectorAll(".md4-player,.formation-sub-chip,#formation-picker-list .formation-player-option,#md-penalty-players button,#matchday-quick-goal .md-player-grid button").forEach(node => {
       const id = nodePlayerId(node);
       if (id) node.dataset.playerId = id;
       ensureDot(node,id);
     });
-    document.querySelectorAll(".matchday-lineup-chip").forEach(node => ensureDot(node,nodePlayerId(node)));
-    document.querySelectorAll(".formation-slot.occupied").forEach(slot => {
-      const id = slot.dataset.playerId || playerIdFromText(slot.querySelector(".formation-player-name")?.textContent || "");
-      if (id) slot.dataset.playerId = id;
-      ensureDot(slot,id);
+    document.querySelectorAll(".matchday-lineup-chip").forEach(node => {
+      const id = nodePlayerId(node); if (id) node.dataset.playerId=id; ensureDot(node,id);
     });
   }
 
@@ -89,21 +99,21 @@
   }
 
   function refreshEligibilityUi() {
-    // Native/legacy selects. Event-player controls deliberately remain untouched.
+    // Every football-action selector except Event must exclude dismissed players.
     ["matchday-sub-off","matchday-sub-on","matchday-goal-player","matchday-goal-assist"].forEach(id => removeDismissedOptions(document.getElementById(id)));
-
-    // Any current sub-select, including bulk rows created after initial render.
     document.querySelectorAll("#md4-sub-view select.md4-off,#md4-sub-view select.md-bulk-off,#md4-sub-view select.md4-on,#md4-sub-view select.md-bulk-on,#matchday-bulk-subs select.md-bulk-off,#matchday-bulk-subs select.md-bulk-on").forEach(removeDismissedOptions);
 
-    // Player buttons are filtered by their real data-player-id. Event screen is the only exception.
+    // Remove dismissed players from scorer, assist, penalty and substitution button grids.
     document.querySelectorAll("#md4-goal-view .md4-player,#md4-sub-view .md4-player,#matchday-quick-goal .md-player-grid button,#md-penalty-players button").forEach(button => {
       const id = nodePlayerId(button);
       if (id) button.dataset.playerId = id;
       if (id && isDismissed(id)) button.remove();
     });
 
+    // Formation subs retain the player so the dismissal is visible, but cannot be selected.
     document.querySelectorAll(".formation-sub-chip").forEach(chip => {
       const id = nodePlayerId(chip);
+      if (id) chip.dataset.playerId=id;
       const sentOff = isDismissed(id);
       chip.classList.toggle("dismissed",sentOff);
       chip.setAttribute("aria-disabled",sentOff?"true":"false");
@@ -113,6 +123,7 @@
 
     document.querySelectorAll("#formation-picker-list .formation-player-option").forEach(button => {
       const id = nodePlayerId(button);
+      if (id) button.dataset.playerId=id;
       const sentOff = isDismissed(id);
       button.classList.toggle("dismissed",sentOff);
       button.disabled = sentOff;
@@ -122,18 +133,13 @@
     });
   }
 
-  function refreshReleaseUi() {
-    refreshCardDots();
-    refreshEligibilityUi();
-  }
+  function refreshReleaseUi() { refreshCardDots(); refreshEligibilityUi(); }
 
   document.addEventListener("click", event => {
     const assist = event.target.closest("#md4-assists .md4-player");
     const noAssist = event.target.closest("#md4-no-assist");
-    if (assist || noAssist) {
-      setTimeout(() => document.getElementById("md4-save-goal")?.click(),0);
-      return;
-    }
+    if (assist || noAssist) { setTimeout(() => document.getElementById("md4-save-goal")?.click(),0); return; }
+
     if (event.target.closest("button[data-opponent-goal-type]")) {
       setTimeout(() => {
         document.querySelector(".opponent-goal-choice")?.classList.add("hidden");
@@ -141,17 +147,17 @@
       },0);
       return;
     }
+
+    // These actions rebuild eligible-player lists synchronously. Re-filter immediately after them.
     if (event.target.closest("#md4-subs,#md4-sub-view button,#matchday-bulk-subs-button,#matchday-bulk-subs button,#open-formation,.matchday-formation-live,.formation-slot,#formation-select,#md4-goal,#matchday-quick-goal-button,#md4-penalty-event")) {
       setTimeout(refreshReleaseUi,0);
-      setTimeout(refreshReleaseUi,60);
+      setTimeout(refreshReleaseUi,50);
     }
   });
 
-  // Last-line guards against stale screens already open when dismissal occurs.
+  // Event is deliberately not included: a dismissed player must remain selectable there to record what happened.
   document.addEventListener("click", event => {
-    const formationOption = event.target.closest("#formation-picker-list .formation-player-option");
-    const playerButton = event.target.closest("#md4-goal-view .md4-player,#md4-sub-view .md4-player,#matchday-quick-goal .md-player-grid button,#md-penalty-players button");
-    const target = formationOption || playerButton;
+    const target = event.target.closest("#formation-picker-list .formation-player-option,#md4-goal-view .md4-player,#md4-sub-view .md4-player,#matchday-quick-goal .md-player-grid button,#md-penalty-players button");
     if (!target) return;
     const id = nodePlayerId(target);
     if (!isDismissed(id)) return;
