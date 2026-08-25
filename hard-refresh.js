@@ -93,13 +93,8 @@
     arranging = true;
     try {
       if (host.parentElement !== header) header.appendChild(host);
-
-      // The user control and refresh icon are deliberately one header grid item.
-      // Reassert this if a later polish layer moves the user button back out.
       if (changeUser.parentElement !== host) host.appendChild(changeUser);
       if (button.parentElement !== host) host.appendChild(button);
-
-      // Required order: User | Refresh.
       if (host.firstElementChild !== changeUser) host.insertBefore(changeUser, host.firstElementChild);
       if (changeUser.nextElementSibling !== button) host.insertBefore(button, changeUser.nextElementSibling);
     } finally {
@@ -131,13 +126,48 @@
           const names = await caches.keys();
           await Promise.all(names.map(name => caches.delete(name)));
         }
-      } catch (_) {
-        // Cache Storage is an enhancement only; continue with cache-busting reload.
-      }
+      } catch (_) {}
 
       const url = new URL(window.location.href);
       url.searchParams.set('_refresh', Date.now().toString());
       window.location.replace(url.toString());
     });
   }
+})();
+
+// Formation substitute colour coding. Uses each player's registered position and the
+// same role colours as the live Matchday lineup.
+(() => {
+  const roleForPosition = position => {
+    const p = String(position || '').toUpperCase();
+    if (p === 'GK') return 'goalkeeper';
+    if (['CB','LB','RB','LWB','RWB','DF','DEF'].includes(p)) return 'defence';
+    if (['CDM','DM','CM','CAM','AM','LM','RM','MF','MID'].includes(p)) return 'midfield';
+    if (['LW','RW','CF','ST','FW','FWD'].includes(p)) return 'attack';
+    return 'other';
+  };
+
+  const allPlayers = () => {
+    const combined = [];
+    if (typeof matchdayPlayers !== 'undefined' && Array.isArray(matchdayPlayers)) combined.push(...matchdayPlayers);
+    if (typeof players !== 'undefined' && Array.isArray(players)) combined.push(...players);
+    return combined;
+  };
+
+  const colourSubs = () => {
+    const chips = document.querySelectorAll('.formation-sub-chip');
+    if (!chips.length) return;
+    const roster = allPlayers();
+    chips.forEach(chip => {
+      chip.classList.remove('position-defence','position-midfield','position-attack','position-goalkeeper','position-other');
+      const name = chip.textContent.trim();
+      const p = roster.find(item => String(item.displayName || item.name || '').trim() === name);
+      chip.classList.add(`position-${roleForPosition(p?.position)}`);
+    });
+  };
+
+  const observer = new MutationObserver(colourSubs);
+  observer.observe(document.body, { childList:true, subtree:true });
+  window.addEventListener('load', colourSubs, { once:true });
+  setTimeout(colourSubs, 0);
 })();
