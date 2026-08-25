@@ -5,6 +5,7 @@
 
   const HALF_TIME_MS = 15 * 60 * 1000;
   const WARNING_MS = 2 * 60 * 1000;
+  const EXPIRED_OVERLAY_MS = 60 * 1000;
   const TICK_MS = 250;
 
   const style = document.createElement("style");
@@ -34,7 +35,7 @@
       position:fixed;
       inset:0;
       z-index:2147483646;
-      pointer-events:none;
+      pointer-events:auto;
       display:none;
       align-items:center;
       justify-content:center;
@@ -43,7 +44,7 @@
       box-sizing:border-box;
       color:#fff;
       background:rgba(207,13,48,.92);
-      font:900 clamp(34px,7vw,88px)/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
       letter-spacing:.02em;
       text-transform:uppercase;
     }
@@ -51,17 +52,43 @@
       display:flex;
       animation:welling-halftime-flash .7s steps(1,end) infinite;
     }
-    #matchday-halftime-flash span {
-      display:block;
-      max-width:900px;
+    #matchday-halftime-flash .halftime-alert-card {
+      width:min(92vw,720px);
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:18px;
       text-shadow:0 2px 8px rgba(0,0,0,.25);
     }
-    #matchday-halftime-flash small {
+    #matchday-halftime-flash .halftime-alert-title {
       display:block;
-      margin-top:14px;
-      font-size:.34em;
+      font:900 clamp(34px,7vw,88px)/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    }
+    #matchday-halftime-flash .halftime-alert-subtitle {
+      display:block;
+      font-size:clamp(16px,2.3vw,26px);
       line-height:1.15;
       letter-spacing:.01em;
+    }
+    #matchday-halftime-ack {
+      min-width:min(86vw,340px);
+      min-height:58px;
+      padding:12px 20px;
+      border:2px solid currentColor;
+      border-radius:14px;
+      background:#fff;
+      color:#cf0d30;
+      font-size:18px;
+      font-weight:950;
+      text-transform:none;
+      box-shadow:0 8px 24px rgba(0,0,0,.18);
+      cursor:pointer;
+    }
+    #matchday-halftime-flash .halftime-alert-fallback {
+      font-size:13px;
+      font-weight:800;
+      text-transform:none;
+      opacity:.9;
     }
     @keyframes welling-halftime-flash {
       0%,49% { background:rgba(207,13,48,.96); color:#fff; }
@@ -91,9 +118,17 @@
     flash = document.createElement("div");
     flash.id = "matchday-halftime-flash";
     flash.setAttribute("aria-hidden", "true");
-    flash.innerHTML = '<span>Half Time Over<small>Ready for the second half</small></span>';
+    flash.innerHTML = `
+      <div class="halftime-alert-card" role="alertdialog" aria-modal="true" aria-labelledby="matchday-halftime-alert-title">
+        <span class="halftime-alert-title" id="matchday-halftime-alert-title">Half Time Over</span>
+        <span class="halftime-alert-subtitle">Ready for the second half</span>
+        <button type="button" id="matchday-halftime-ack">Back to Matchday</button>
+        <span class="halftime-alert-fallback">This alert will close automatically after 60 seconds.</span>
+      </div>`;
     document.body.appendChild(flash);
   }
+
+  const ackButton = flash.querySelector("#matchday-halftime-ack");
 
   function save() {
     if (typeof saveState === "function") saveState();
@@ -113,9 +148,24 @@
     return true;
   }
 
+  function hideExpiredOverlay({ persist = false } = {}) {
+    flash.classList.remove("active");
+    flash.setAttribute("aria-hidden", "true");
+    if (persist && !state.halfTimeExpiredDismissed) {
+      state.halfTimeExpiredDismissed = true;
+      save();
+    }
+  }
+
   function clearHalfTimeState({ persist = true } = {}) {
     let changed = false;
-    for (const key of ["halfTimeStartedAt", "halfTimeTwoMinuteAlerted", "halfTimeExpiredAlerted"]) {
+    for (const key of [
+      "halfTimeStartedAt",
+      "halfTimeTwoMinuteAlerted",
+      "halfTimeExpiredAlerted",
+      "halfTimeExpiredAt",
+      "halfTimeExpiredDismissed"
+    ]) {
       if (state[key] !== undefined && state[key] !== null) {
         delete state[key];
         changed = true;
@@ -123,8 +173,7 @@
     }
     countdown.classList.add("hidden");
     countdown.classList.remove("warning", "expired");
-    flash.classList.remove("active");
-    flash.setAttribute("aria-hidden", "true");
+    hideExpiredOverlay();
     if (changed && persist) save();
   }
 
@@ -145,8 +194,7 @@
       if (state.halfTimeStartedAt) clearHalfTimeState();
       else {
         countdown.classList.add("hidden");
-        flash.classList.remove("active");
-        flash.setAttribute("aria-hidden", "true");
+        hideExpiredOverlay();
       }
       return;
     }
@@ -175,8 +223,22 @@
     } else {
       countdown.classList.add("expired");
       countdown.textContent = "HALF TIME OVER";
-      flash.classList.add("active");
-      flash.setAttribute("aria-hidden", "false");
+
+      if (!state.halfTimeExpiredAt) {
+        state.halfTimeExpiredAt = Date.now();
+        save();
+      }
+
+      const expiredFor = Date.now() - Number(state.halfTimeExpiredAt || Date.now());
+      const shouldShow = !state.halfTimeExpiredDismissed && expiredFor < EXPIRED_OVERLAY_MS;
+
+      if (shouldShow) {
+        flash.classList.add("active");
+        flash.setAttribute("aria-hidden", "false");
+      } else {
+        hideExpiredOverlay({ persist: !state.halfTimeExpiredDismissed });
+      }
+
       if (!state.halfTimeExpiredAlerted) {
         state.halfTimeExpiredAlerted = true;
         save();
@@ -185,6 +247,10 @@
     }
   }
 
+  ackButton?.addEventListener("click", () => {
+    hideExpiredOverlay({ persist: true });
+  });
+
   // Start the 15-minute countdown at the exact press of Pause / Halftime.
   // The existing Matchday handler still performs the actual match pause.
   md.pause?.addEventListener("click", () => {
@@ -192,6 +258,8 @@
     state.halfTimeStartedAt = Date.now();
     delete state.halfTimeTwoMinuteAlerted;
     delete state.halfTimeExpiredAlerted;
+    delete state.halfTimeExpiredAt;
+    delete state.halfTimeExpiredDismissed;
     save();
     setTimeout(update, 0);
   }, true);
